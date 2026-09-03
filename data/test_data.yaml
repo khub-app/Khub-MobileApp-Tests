@@ -1,0 +1,10 @@
+# Test inputs for the Khub PreProd Admin app.
+# TODO: confirm real admin credentials with the dev team — the values below are
+# the shared preprod backend login used across the KHub test suites.
+login:
+  valid:
+    username: "preprod"
+    password: "Password@123"
+  invalid:
+    username: "preprod"
+    password: "wrong-password"
