@@ -20,7 +20,6 @@ class TestValidLogin(BaseTest):
     """The class-scoped `driver` fixture clears app data first, so this starts
     on the Login screen."""
 
-    @pytest.mark.smoke
     @pytest.mark.login
     def test_valid_login_lands_on_dashboard(self):
         creds = TEST_DATA["login"]["valid"]

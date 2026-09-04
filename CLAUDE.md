@@ -65,12 +65,26 @@ logged out on the Login screen.
 
 ## How to Run
 
+Preferred (mirrors khub-pos-tests) — reads `data/test_data.xlsx` `RunConfig`
+sheet for environment + Smoke/Regression toggle, `Tags` sheet for which markers
+each file gets:
+
+```
+.\run_mobile_tests.ps1
+.\run_mobile_tests.ps1 -Path tests/login -Suite ""     # a folder, no marker filter
+.\run_mobile_tests.ps1 -Env real_device
+```
+
+Direct pytest (bypass the sheet):
+
 ```
 venv\Scripts\python.exe -m pytest tests/ -v
 venv\Scripts\python.exe -m pytest tests/login/ -v
 venv\Scripts\python.exe -m pytest tests/ -v -m smoke
 venv\Scripts\python.exe -m pytest tests/ -v --env=real_device
 ```
+
+Full command reference: **COMMANDS.md**.
 
 The Allure HTML report is regenerated automatically after every run
 (`conftest.py` `pytest_sessionfinish`) → `reports/allure-report/index.html`.
@@ -88,6 +102,7 @@ khub-mobileApp-tests/
 │   └── config_reader.py     # loads config.yaml, resolves active env (MOBILE_ENV / --env)
 ├── data/
 │   ├── test_data.yaml       # credentials + test inputs
+│   ├── test_data.xlsx       # RunConfig + Tags + TestConfigs sheets (mirrors khub-pos-tests)
 │   └── apk/preprod-admin.apk
 ├── locators/                # AppiumBy tuples only, one file per screen
 │   ├── login_locators.py
@@ -106,8 +121,12 @@ khub-mobileApp-tests/
 │   ├── screenshot_helper.py
 │   └── report_metadata.py   # Allure environment.properties / executor.json
 ├── scripts/
-│   └── inspect_app.py       # launch the app + dump page_source/screenshot for locator work
-├── conftest.py              # driver fixture, per-step screenshots, fail-fast within a class, Allure gen
+│   ├── inspect_app.py       # launch the app + dump page_source/screenshot for locator work
+│   ├── gen_test_data_xlsx.py# rebuilds data/test_data.xlsx (edit here, not the binary)
+│   └── read_run_config.py   # run_mobile_tests.ps1 reads RunConfig sheet via this
+├── run_mobile_tests.ps1            # RunConfig-sheet-driven runner (Environment + Smoke/Regression)
+├── COMMANDS.md              # command reference (emulator / Appium / run / APK)
+├── conftest.py              # driver fixture, Excel Tags markers, per-step screenshots, fail-fast, Allure gen
 ├── pytest.ini
 └── requirements.txt
 ```
@@ -134,12 +153,72 @@ inputs. What IS available:
   silently dropped and the form submits with "Please Enter ..." errors.
   `BasePage.type_text` taps the element first — keep it that way.
 - **Login is slow.** The backend round-trip on a loaded emulator takes 30s+;
-  `is_login_successful()` waits up to 60s for the Dashboard.
+  `is_login_successful()` waits up to 60s (90s in `MobileBaseSetup`).
+- **Emulator connectivity flakes → login hangs.** The `Pixel_Tablet` AVD's
+  network sometimes comes up (or drops) without a `VALIDATED` default — the
+  simulated "AndroidWifi" AP fails its captive-portal check — and then the
+  app's backend login hangs for the full timeout (`Login precondition failed`).
+  `DriverManager._ensure_connectivity()` runs before every class: it checks
+  `dumpsys connectivity` and, **only if the default is non-validated**, cycles
+  Wi-Fi off/on and waits up to 30s for it to validate. It never blindly
+  disables Wi-Fi (on some boots Wi-Fi is the only network). Manual check:
+  `adb shell dumpsys connectivity | grep "Active default network"` and look for
+  `VALIDATED` in that network's capabilities; `adb shell svc wifi disable; adb
+  shell svc wifi enable` usually fixes it.
+- **The RN view tree is virtualised.** Fields above/below the viewport are
+  absent from `page_source` until scrolled near — use `BasePage.swipe_to(locator)`
+  before touching anything off-screen.
+- **Most panels/rows are one flattened element.** A Sales History card, a cart
+  line, an order-details panel each render as a single `View` whose
+  `content-desc` is every field newline-joined. Locate by
+  `descriptionContains("<SO-… / SKU / unique text>")` and parse fields out of
+  the string (see `SalesHistoryPage._fields_from_desc`, `CreateSaleOrderPage.get_cart_line`).
+- **The app renders in a ~1200×1536 window** centred on the 2560×1600 tablet
+  (bounds start at x≈680) — this is Android's freeform/windowed mode, not a bug.
 - **First cold launch** can show Android's tablet "See and do more / Got it"
   windowing hint (a system overlay, not app UI). Dismiss with
   `UiSelector().text("Got it")` if it blocks interaction.
 - `AppiumBy.ID` does not resolve this app's ids — use `UiSelector().resourceId()`
   or `content-desc` (same as khub-pos-tests).
+
+### Sale Order / Fulfillment locator notes (captured live 2026-09-03)
+- **Hamburger**: first clickable `android.view.View` in the app (no id/desc).
+- **Nav drawer items**: `content-desc` = "Home" / "Fulfillment" / "Sales History" / …
+- **Sales History**: `+` FAB is the only `Button` with no `content-desc`. Each
+  order card's `content-desc` carries Order Number / Order Type / Invoice Status
+  / Status / Sale Total / Business Name; its ••• is `content-desc="Show menu"`.
+  The FAB sometimes **expands into a speed-dial** instead of navigating
+  straight to Create Sale Order - mini-FABs "Sale Order" / "Sale Return"
+  appear and the main `+` morphs into an `X` (close) that then sits where `+`
+  was, so a blind second tap on the same locator just closes the dial again.
+  `SalesHistoryPage.tap_create_sale_order()` handles both: taps the FAB, then
+  either finds itself already on Create Sale Order, taps the "Sale Order"
+  option if the dial opened, or retries the FAB if neither happened.
+- **Create Sale Order**: customer search + product search are each the 1st
+  `EditText`; Order Type value renders as a `Button` (`Offsite`→ tap → pick
+  `Online`); notes fields keyed by `hint="Notes (Internal)"` / `"Notes (Print on
+  Invoice)"`; `Next` = `content-desc="Next"`.
+- **Product step**: search by SKU → tap the result (`descriptionContains(sku)`) →
+  set qty (2nd `EditText`) → `Add To Cart`. Cart line desc is
+  "<name>\n<cat>\n<sku>/<upc>\nQty: <avail>\nPrice *\nSale Price:$<p>\nOrder Qty
+  *\nSub Total\n$<sub>\nUnit *\nTotal: $<sub>".
+- **Cart Summary / Payment**: totals are individual `content-desc` label+value
+  pairs; success dialog text = "SaleOrder has been saved successfully.".
+- **Fulfillment**: tabs are `Pending (n)` / `Picking Paused (n)` / `Picked (n)`
+  / `Packing (n)` / `Packed (n)` — match with `descriptionStartsWith`. Each
+  order card is one flattened content-desc; once assigned it gains a leading
+  `Picker Detail\n<user>`.
+- **Assign**: tap the (unassigned) card → bottom sheet "This order not been
+  assigned" → button **"Assign to me"** → info dialog "Order has been assigned
+  to the user '<user>'." → OK.
+- **Pick**: reopen the assigned card → "Start Picking" → status-dialog OK →
+  red **"Skip Scan Pick All"** → dialog 1 "…still some products to be picked…"
+  → **Yes** → dialog 2 "Do you want to confirm picking your order?" →
+  **Pick** (not "Yes"/"Confirm"). Then "Start Packing" appears.
+- **Pack**: "Start Packing" → red **"Skip Scan Pack All"** → **Yes** → **Pack**
+  → success dialog "**SO-<n> has been successfully packed.**" → OK.
+- Other dialog confirm-button labels vary — `BasePage.tap_ok(labels=(...))`
+  tries a list rather than hard-coding one.
 
 ### Finding new locators
 ```
@@ -168,5 +247,6 @@ in `scripts/_inspect/`.
 | Module | Tests |
 |--------|-------|
 | **Login** | Valid login → Dashboard; empty-credentials validation errors |
+| **Sale Order + Fulfillment** | `tests/fulfillment/test_online_sale_fulfillment.py` — API-built customer + products (`online_sale.product_count` in `data/test_data.yaml`, default 2) → create & fully-pay (Cash) an **Online** sale → validate in Sales History + View Details → assign to me → pick all → pack all → confirm the same `SO-…` in the Packed section. One `test_NN_*` per UI step, shared class state, API test-data via `utilities/api_client.py` (`ApiClient`, ported from khub-pos-tests). Generated names come from `utilities/test_data_names.py` — a realistic business/product name + `QA-<YYMMDD>-<HHMMSS>-<rand>` tag (kept byte-identical across khub-pos-tests / khub-Ecom-tests). |
 
-Everything else (Fulfillment, Sales, Customers, Profile, Scan) is future work.
+Everything else (Sales, Customers, Profile, Scan) is future work.

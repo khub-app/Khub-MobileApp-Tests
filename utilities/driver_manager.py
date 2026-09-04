@@ -1,6 +1,7 @@
 import os
 import shutil
 import subprocess
+import time
 
 from appium import webdriver
 from appium.options.android import UiAutomator2Options
@@ -40,6 +41,62 @@ class DriverManager:
             logger.warning(f"adb pm clear failed for {app_package}: {result.stderr.strip()}")
         else:
             logger.info(f"Cleared app data for {app_package}")
+
+        self._ensure_connectivity()
+
+    def _adb_shell(self, *args, timeout: int = 15) -> str:
+        cmd = [self._adb_path()]
+        if self.config.get("udid"):
+            cmd += ["-s", self.config["udid"]]
+        cmd += ["shell", *args]
+        try:
+            return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout).stdout
+        except Exception as e:
+            logger.debug(f"adb shell {' '.join(args)} failed: {e}")
+            return ""
+
+    def _default_network_validated(self) -> bool | None:
+        """True/False if a default network exists and its VALIDATED state is
+        known; None if adb couldn't tell us."""
+        out = self._adb_shell("dumpsys", "connectivity")
+        if not out:
+            return None
+        if "Active default network: none" in out:
+            return False
+        line = next((ln for ln in out.splitlines() if "Active default network:" in ln), "")
+        net_id = line.split(":", 1)[1].strip() if ":" in line else ""
+        # the block for that network id carries its Capabilities: ...
+        block = next((b for b in out.split("NetworkAgentInfo") if f"network{{{net_id}}}" in b), "")
+        if not block:
+            return None
+        return "VALIDATED" in block
+
+    def _ensure_connectivity(self):
+        """The Pixel_Tablet AVD's network occasionally comes up without a
+        VALIDATED default (the simulated "AndroidWifi" AP fails its portal
+        check), which makes the app's backend login hang for the full timeout.
+        A Wi-Fi off/on cycle almost always fixes it. We only intervene when
+        the default is actually non-validated - never blindly disable Wi-Fi,
+        since on some boots it is the only network. Real devices are left
+        alone."""
+        if self.config.get("udid"):
+            return
+        validated = self._default_network_validated()
+        if validated is True:
+            return
+        if validated is None:
+            logger.debug("Could not read emulator connectivity; leaving it alone")
+            return
+        logger.warning("Emulator default network is not VALIDATED - cycling Wi-Fi")
+        self._adb_shell("svc", "wifi", "disable")
+        time.sleep(2)
+        self._adb_shell("svc", "wifi", "enable")
+        for _ in range(10):
+            time.sleep(3)
+            if self._default_network_validated() is True:
+                logger.info("Emulator connectivity restored")
+                return
+        logger.warning("Emulator still has no validated network - login is likely to fail")
 
     @staticmethod
     def _adb_path() -> str:

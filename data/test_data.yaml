@@ -1,6 +1,6 @@
 # Test inputs for the Khub PreProd Admin app.
-# TODO: confirm real admin credentials with the dev team — the values below are
-# the shared preprod backend login used across the KHub test suites.
+# login.valid is the ONLY valid credential pair for this app (confirmed
+# 2026-09-03) — the shared preprod tenant login used across all KHub suites.
 login:
   valid:
     username: "preprod"
@@ -8,3 +8,16 @@ login:
   invalid:
     username: "preprod"
     password: "wrong-password"
+
+# E2E "create paid Online sale -> validate -> assign -> pick -> pack" test.
+# All business data (customer, products, SKUs, prices, order number, totals)
+# is generated per-run via the API - only the knobs below are fixed, and
+# every one of them is overridable here without touching code.
+online_sale:
+  order_type: "Online"
+  payment_mode: "Cash"
+  product_count: 2              # 2-10 supported; kept at 2 so a run stays quick
+  product_prices: [10.00, 12.50, 15.00, 8.75, 20.00]   # cycled if count > len
+  quantities: [2, 3, 1, 1, 2]                          # cycled if count > len
+  internal_note_prefix: "AUTO-INTERNAL"
+  invoice_note_prefix: "AUTO-INVOICE"

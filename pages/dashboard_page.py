@@ -22,3 +22,18 @@ class DashboardPage(BasePage):
 
     def open_customers(self):
         return self.open_tab(DashboardLocators.TAB_CUSTOMERS)
+
+    def open_nav_drawer(self):
+        from pages.nav_drawer_page import NavDrawerPage
+
+        return NavDrawerPage(self.driver).open()
+
+    def go_to_sales_history(self):
+        from pages.nav_drawer_page import NavDrawerPage
+
+        return NavDrawerPage(self.driver).go_to_sales_history()
+
+    def go_to_fulfillment(self):
+        from pages.nav_drawer_page import NavDrawerPage
+
+        return NavDrawerPage(self.driver).go_to_fulfillment()

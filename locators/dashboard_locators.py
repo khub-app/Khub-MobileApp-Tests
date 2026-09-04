@@ -16,5 +16,8 @@ class DashboardLocators:
     TAB_PROFILE = (AppiumBy.ANDROID_UIAUTOMATOR, 'new UiSelector().descriptionStartsWith("Profile\nTab")')
     TAB_SCAN = (AppiumBy.ANDROID_UIAUTOMATOR, 'new UiSelector().descriptionStartsWith("Scan\nTab")')
 
+    # The header hamburger has no id / content-desc - it is the first
+    # clickable View in the app (confirmed live 2026-09-03; the earlier
+    # Button-based selector never matched this RN build).
     HAMBURGER_MENU = (AppiumBy.ANDROID_UIAUTOMATOR,
-                      'new UiSelector().className("android.widget.Button").instance(0)')
+                      'new UiSelector().className("android.view.View").clickable(true).instance(0)')

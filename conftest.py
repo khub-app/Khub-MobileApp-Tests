@@ -2,6 +2,7 @@ import os
 import shutil
 import subprocess
 
+import openpyxl
 import pytest
 
 from utilities.driver_manager import DriverManager
@@ -19,6 +20,60 @@ def pytest_addoption(parser):
         default=None,
         help="Target environment defined in config/config.yaml (e.g. emulator, real_device)",
     )
+
+
+# ------------------ Dynamic markers from Excel Tags sheet ------------------
+# Mirrors khub-pos-tests' conftest.py: data/test_data.xlsx's "Tags" sheet has
+# one row per test file (FilePath | smoke | regression | Date Added). A "Yes"
+# in a marker column auto-applies that pytest marker to every item collected
+# from that file, so `pytest -m smoke` / `-m regression` are driven by the
+# spreadsheet instead of hardcoded decorators. New test file -> add a row
+# there (exact relative path, matched as a path suffix) or it gets no markers.
+
+def _load_tags_from_excel():
+    """Read the Tags sheet and return {filepath: [marker_names]}."""
+    excel_path = os.path.join(os.path.dirname(__file__), "data", "test_data.xlsx")
+    if not os.path.exists(excel_path):
+        return {}
+    wb = openpyxl.load_workbook(excel_path, read_only=True, data_only=True)
+    if "Tags" not in wb.sheetnames:
+        wb.close()
+        return {}
+    ws = wb["Tags"]
+    headers = [cell.value for cell in ws[1]]
+    marker_names = headers[1:]  # skip FilePath column
+    tag_map = {}
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        filepath = row[0]
+        if not filepath:
+            continue
+        filepath = filepath.replace("\\", "/")
+        markers = []
+        for i, val in enumerate(row[1:]):
+            if val and str(val).strip().lower() == "yes" and i < len(marker_names):
+                markers.append(marker_names[i])
+        if markers:
+            tag_map[filepath] = markers
+    wb.close()
+    return tag_map
+
+
+def pytest_collection_modifyitems(config, items):
+    """Auto-apply markers from the Excel Tags sheet to collected test items."""
+    tag_map = _load_tags_from_excel()
+    if not tag_map:
+        return
+    applied_count = 0
+    for item in items:
+        item_path = str(item.fspath).replace("\\", "/")
+        for tagged_path, markers in tag_map.items():
+            if item_path.endswith(tagged_path):
+                for marker_name in markers:
+                    item.add_marker(getattr(pytest.mark, marker_name))
+                applied_count += 1
+                break
+    if applied_count:
+        print(f"\n[INFO] Applied Excel tags to {applied_count} test items from {len(tag_map)} tagged files")
 
 
 # Holds whatever driver is currently active so the autouse screenshot fixture

@@ -18,7 +18,7 @@ environments:
     platform_version: "15"                 # Pixel_Tablet AVD is API 35 / Android 15
     app_package: com.esolutions.demotaxadmin
     app_activity: com.esolutions.demotaxadmin.MainActivity
-    app_path: null                         # app already installed; set to data/apk/preprod-admin.apk for a fresh install
+    app_path: data/apk/preprod-admin.apk   # Appium auto-installs this if the app is missing/outdated on the AVD (drop the APK here — it's gitignored)
     no_reset: true
     full_reset: false
     auto_grant_permissions: true

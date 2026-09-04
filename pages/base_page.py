@@ -90,6 +90,71 @@ class BasePage:
         )
         return self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, selector)
 
+    def _present(self, locator) -> bool:
+        """Immediate presence check (no wait). The framework never sets a
+        Selenium implicit wait, so find_elements returns at once."""
+        try:
+            return len(self.driver.find_elements(*locator)) > 0
+        except Exception:
+            return False
+
+    def find_all(self, locator):
+        return self.driver.find_elements(*locator)
+
+    def swipe_to(self, locator, direction: str = "up", max_swipes: int = 8,
+                percent: float = 0.6, timeout: int = 25):
+        """Swipe the scrollable area until `locator` is in the view tree, then
+        return it. This React Native app virtualises its scroll content -
+        fields below/above the viewport are simply absent from page_source
+        until scrolled near - so interacting with anything off-screen needs
+        this first.
+
+        `locator` not being found isn't always "it's further down the list":
+        a screen that just reloaded from the backend (e.g. right after
+        assigning an order) can take a few seconds to re-render before the
+        card exists at all. So each swipe attempt is followed by a settle
+        pause, and the final check is a real `timeout`-second wait rather
+        than an instant one - not just a single snapshot."""
+        for _ in range(max_swipes):
+            if self._present(locator):
+                return self.find(locator, timeout=timeout)
+            self._swipe(direction, percent)
+            time.sleep(1)  # let the (possibly still-loading) list settle
+        return self.find(locator, timeout=timeout)
+
+    def _swipe(self, direction: str = "up", percent: float = 0.6, speed: int = 3000):
+        size = self.driver.get_window_size()
+        self.driver.execute_script("mobile: swipeGesture", {
+            "left": int(size["width"] * 0.3),
+            "top": int(size["height"] * 0.25),
+            "width": int(size["width"] * 0.4),
+            "height": int(size["height"] * 0.5),
+            "direction": direction,
+            "percent": percent,
+            "speed": speed,
+        })
+
+    def tap_ok(self, labels=("OK", "Ok", "Okay", "Yes", "Confirm", "Done"), timeout: int = 20):
+        """Tap the first dialog-confirm button from `labels` to appear (matched
+        by content-desc). Polls up to `timeout`s since dialogs animate in.
+        Returns the label used; raises if none appear."""
+        import time as _t
+
+        deadline = _t.time() + timeout
+        while _t.time() < deadline:
+            for label in labels:
+                loc = (AppiumBy.ANDROID_UIAUTOMATOR, f'new UiSelector().description("{label}")')
+                if self._present(loc):
+                    self.click(loc, timeout=5)
+                    return label
+            _t.sleep(0.5)
+        raise AssertionError(f"No dialog button found from {labels} within {timeout}s")
+
+    def tap_desc_contains(self, text: str, timeout=None):
+        return self.click(
+            (AppiumBy.ANDROID_UIAUTOMATOR, f'new UiSelector().descriptionContains("{text}")'),
+            timeout)
+
     def take_screenshot(self, name: str) -> str:
         return take_screenshot(self.driver, name)
 
