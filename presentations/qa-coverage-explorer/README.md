@@ -24,4 +24,6 @@ When coverage changes (a new module, a new test step, an updated module count), 
 
 ## Last updated
 
+2026-10-29 — Added a 3rd module, UOM Multi-Unit Sale Order + Fulfillment (`tests/fulfillment/test_uom_multi_unit_sale_fulfillment.py`, 12 steps — mirrors khub-web-tests' UOM scenario: one product with 4 chained packaging tiers added as 4 separate order lines, fully paid, validated, taken through assign/pick/pack/Packed). Updated the summary headline to 3 modules.
+
 2026-10-26 — Created. 2 modules: Login & Authentication (`tests/login/test_login.py`, 2 scenarios) and Online Sale + Fulfillment E2E (`tests/fulfillment/test_online_sale_fulfillment.py`, 12 steps — API test-data prep through Cash payment, Sales History/View Details validation, Assign, Pick, Pack and the Packed section). Coverage bullets sourced directly from the two test files' `@allure.title`s and assertions.

@@ -149,10 +149,10 @@ button.mod[aria-pressed="true"]{border-color:var(--accent);background:var(--acce
 
   <div class="summaryCard">
     <p class="eyebrow">Summary</p>
-    <h2>2 modules. One order, followed end to end.</h2>
+    <h2>3 modules. Every order, followed end to end.</h2>
     <ul>
-      <li>Test data (1 customer + N products) created through the backend API, never the UI, tagged uniquely per run</li>
-      <li>One Online sale tracked through Cash payment, Sales History, View Details, Assign, Pick, Pack and the Packed section</li>
+      <li>Test data (customer + products, including multi-tier UOM products) created through the backend API, never the UI, tagged uniquely per run</li>
+      <li>Two full Online-sale lifecycles tracked through Cash payment, Sales History, View Details, Assign, Pick, Pack and the Packed section — one plain, one multi-unit (Piece/Pack/Case/Pallet)</li>
       <li>Hardened against real device/emulator flakiness: stale RN elements, ANR dialogs, Wi-Fi validation, FAB speed-dial races</li>
       <li>Shares its Page Object Model and Excel-driven RunConfig/Tags framework with khub-pos-tests and khub-web-tests</li>
     </ul>
@@ -178,13 +178,27 @@ var DATA = {
     ['Pick All Products','Re-open the order, Start Picking → Skip Scan Pick All → Yes → Pick; the workflow advances to the packing stage.'],
     ['Pack All Products','Start Packing → Skip Scan Pack All → Yes → Pack; the “successfully packed” dialog names this exact SO-… order.'],
     ['Validate Packed Section','Confirm the order has left Pending, open the Packed tab, locate the same order number, and verify customer / Order Type / picker on the Packed card (evidence screenshot attached to Allure).']
+  ]},
+  uom: {name:'UOM Multi-Unit Sale Order + Fulfillment', count:12, rich:true, items:[
+    ['Prepare Test Data (API)','Create 1 customer + 1 product with 4 chained packaging tiers (Piece/Pack/Case/Pallet, custom labels on the top 3 — default Box/Carton/Package) through the backend API, each tier with its own UPC and price.'],
+    ['Open Sales History → Create Sale Order','Dashboard → hamburger → Sales History → tap the + FAB → Create Sale Order opens.'],
+    ['Customer + Order Info','Select the API-generated customer; set Order Type = Online; add unique internal + invoice notes; Next.'],
+    ['Add All 4 UOM Tiers as 4 Separate Lines','Search the shared SKU, set quantity on the stepper, Add To Cart (Piece tier). Then for Pack/Case/Pallet: tap the cart line’s “Add another unit” button and pick that tier’s label — each tap adds a brand-new line. Verify all 4 lines by SKU+UPC and that each line’s subtotal = tier price × qty.'],
+    ['Validate Cart Summary','Total quantity across all 4 lines, Sub Total = sum of the 4 tier subtotals, $0.00 discount, captured Tax, Grand Total = Sub Total + Tax.'],
+    ['Complete Cash Sale','Payment page shows the correct customer and Grand Total; pay in full with Cash; Complete Sale → “saved successfully” dialog → OK.'],
+    ['Validate Sales History Card','Capture the new SO-… number; assert Business Name, Order Type = Online, Invoice Status = Paid, Status = Pending, Sale Total = Grand Total.'],
+    ['Validate Order via View Details','Order number, customer and Grand Total appear; every one of the 4 tier line totals (Piece/Box/Carton/Package subtotals) is present on the invoice.'],
+    ['Assign Order to Me','Fulfillment → Pending → locate the order by number; tap Assign to me; the confirmation names the logged-in user.'],
+    ['Pick All Tiers','Start Picking → Skip Scan Pick All → Yes → Pick; the workflow advances to packing.'],
+    ['Pack All Tiers','Start Packing → Skip Scan Pack All → Yes → Pack; the “successfully packed” dialog names this exact order.'],
+    ['Validate Packed Section','Confirm the order has left Pending, open the Packed tab, locate the same order number, and verify customer / Order Type / picker on the Packed card.']
   ]}
 };
-var ORDER = ['login','fulfillment'];
+var ORDER = ['login','fulfillment','uom'];
 
 var grid = document.getElementById('grid');
 var panel = document.getElementById('panel');
-var current = 'fulfillment';
+var current = 'uom';
 
 ORDER.forEach(function(k){
   var b = document.createElement('button');
