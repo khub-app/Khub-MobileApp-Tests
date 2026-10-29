@@ -66,10 +66,10 @@ class FulfillmentPage(BasePage):
         return self
 
     def _card(self, order_no: str, timeout: int = 30):
-        return self.swipe_to(L.order_card(order_no), max_swipes=10)
+        return self.swipe_to(L.order_card(order_no), max_swipes=10, timeout=timeout)
 
-    def get_order_desc(self, order_no: str) -> str:
-        return self._card(order_no).get_attribute("content-desc") or ""
+    def get_order_desc(self, order_no: str, timeout: int = 30) -> str:
+        return self._card(order_no, timeout=timeout).get_attribute("content-desc") or ""
 
     def is_order_present(self, order_no: str, timeout: int = 20) -> bool:
         return self.is_displayed(L.order_card(order_no), timeout)
@@ -109,20 +109,42 @@ class FulfillmentPage(BasePage):
         return msg
 
     def is_assigned_to(self, order_no: str, user: str, timeout: int = 30) -> bool:
-        """Re-applies the search filter (assigning can drop it / reshuffle
-        the list) and polls the card's content-desc for "Picker Detail" +
-        `user`, since the list can take a moment to reflect a just-completed
-        assignment."""
+        """Switches to the "Self Assigned" sub-tab - confirmed live 2026-09-16
+        that a card's "Picker Detail" field only renders there; the default
+        "All" sub-tab shows the identical card with no Picker Detail field at
+        all, assigned or not, so checking it there always reads as unassigned.
+        Re-applies the search filter (assigning can drop it / reshuffle the
+        list) and polls, since the list can take a moment to reflect a
+        just-completed assignment. Leaves the list back on "All" either way,
+        so later steps (picking/packing) see the full list again."""
         deadline = time.time() + timeout
         desc = ""
+        found = False
+        self.click(L.SUB_TAB_SELF_ASSIGNED)
+        time.sleep(1)
         while time.time() < deadline:
             self.search(order_no)
-            desc = self.get_order_desc(order_no)
+            # A miss raises (swipe_to's final wait times out) rather than
+            # returning empty - confirmed live 2026-09-23 this was escaping
+            # uncaught and killing the whole retry loop on the very first
+            # "not visible yet" cycle. A short per-cycle timeout keeps each
+            # poll quick so the outer `timeout` budget is actually spent
+            # retrying, not blocked inside one lookup.
+            try:
+                desc = self.get_order_desc(order_no, timeout=5)
+            except Exception as e:
+                logger.debug(f"Order {order_no} not visible under Self Assigned yet: {e}")
+                desc = ""
             if "Picker Detail" in desc and user in desc:
-                return True
+                found = True
+                break
             time.sleep(2)
-        logger.warning(f"Order {order_no} card not showing '{user}' as picker: {desc!r}")
-        return False
+        if not found:
+            logger.warning(f"Order {order_no} card not showing '{user}' as picker: {desc!r}")
+        if self._present(L.SUB_TAB_ALL):
+            self.click(L.SUB_TAB_ALL)
+            time.sleep(1)
+        return found
 
     # ---- open for picking ----
     def open_order_for_picking(self, order_no: str):

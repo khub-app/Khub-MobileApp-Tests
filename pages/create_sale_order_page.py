@@ -104,6 +104,42 @@ class CreateSaleOrderPage(BasePage):
         assert self.is_in_cart(sku), f"Product {sku} did not appear in the cart"
         return self
 
+    def add_product_all_uom_tiers(self, product: dict, piece_qty: int = 1) -> list[str]:
+        """Add every configured tier of a UOM product (Piece/Pack/Case/
+        Pallet, custom labels on tiers 2-4) as 4 SEPARATE cart lines.
+
+        The first tier (Piece) goes through the normal search + Add To Cart
+        flow, with `piece_qty` set via the stepper shown before Add To Cart
+        is tapped. The app has no Unit selector before that point - all 4
+        tiers share one SKU and one search result - so the other 3 tiers
+        are each added via the cart line's own "Add another unit" menu,
+        which lists only the tiers not yet in the cart by their configured
+        label (confirmed live 2026-10-29). Those 3 always land at qty=1:
+        once a line exists, "Order Qty *" is a read-only View, not an
+        EditText, and nothing in the UI opens a qty editor for it - there is
+        no app-side way to make it anything else right now. Fails fast if a
+        tier never produces its own cart line (matched by SKU+UPC, since
+        UPC is the only thing that tells same-SKU tier lines apart).
+
+        Returns the 4 UPCs in Piece/Pack/Case/Pallet order.
+        """
+        sku = product["sku"]
+        self.add_product_by_sku(sku, qty=piece_qty)
+        upcs = [product["piece_upc"]]
+        for label, upc in (
+            (product["pack_desc"], product["pack_upc"]),
+            (product["case_desc"], product["case_upc"]),
+            (product["pallet_desc"], product["pallet_upc"]),
+        ):
+            self.click(L.ADD_ANOTHER_UNIT)
+            time.sleep(1)
+            self.click(L.unit_option(label))
+            time.sleep(2)
+            assert self.is_in_cart(sku, upc=upc), (
+                f"Tier '{label}' did not produce its own cart line (SKU {sku}, UPC {upc})")
+            upcs.append(upc)
+        return upcs
+
     def _search_product_result(self, sku: str, timeout: int):
         deadline = time.time() + timeout
         attempt = 0
@@ -123,19 +159,41 @@ class CreateSaleOrderPage(BasePage):
             f"Product SKU {sku} was not searchable within {timeout}s - the backend "
             f"catalog index is likely lagging; try again once it catches up.")
 
-    def is_in_cart(self, sku: str, timeout: int = 15) -> bool:
-        return self.is_displayed(L.cart_line(sku), timeout)
+    def is_in_cart(self, sku: str, upc: str | None = None, timeout: int = 15) -> bool:
+        return self.is_displayed(L.cart_line(sku, upc), timeout)
 
-    def set_cart_quantity(self, sku: str, qty: int):
-        self.swipe_to(L.cart_line(sku))
-        self.type_text(L.cart_line_qty_field(sku), str(qty), clear_first=True)
-        self.hide_keyboard()
-        return self
+    def set_cart_quantity(self, sku: str, qty: int, upc: str | None = None):
+        """Set the Order Qty on one cart line. Finds the qty EditText as a
+        CHILD of the exact line element (via UIA descriptionContains, which
+        matches only that element's own content-desc - unambiguous even
+        when several same-SKU UOM-tier lines are in the cart), rather than
+        a standalone global XPath: that pattern matched the wrong row (or
+        nothing clickable) once multiple same-SKU lines existed - confirmed
+        live 2026-10-29, the global `//View[contains(...)]//EditText[2]`
+        form was never exercised by a passing single-line test before."""
+        from selenium.common.exceptions import StaleElementReferenceException
 
-    def get_cart_line(self, sku: str) -> dict:
+        last_exc = None
+        for attempt in range(3):
+            try:
+                line_el = self.swipe_to(L.cart_line(sku, upc))
+                qty_field = line_el.find_element(AppiumBy.XPATH, './/android.widget.EditText[2]')
+                qty_field.click()
+                qty_field.clear()
+                qty_field.send_keys(str(qty))
+                self.hide_keyboard()
+                return self
+            except StaleElementReferenceException as e:
+                last_exc = e
+                logger.debug(f"Stale cart line on attempt {attempt + 1}/3 for {sku}/{upc}, retrying")
+                time.sleep(0.5)
+        raise last_exc
+
+    def get_cart_line(self, sku: str, upc: str | None = None) -> dict:
         """Parse a cart line's content-desc into {name, category, sku, upc,
-        available, sale_price, sub_total}."""
-        el = self.swipe_to(L.cart_line(sku))
+        available, sale_price, sub_total}. Pass `upc` to target one tier of
+        a UOM product - all of its tiers share the same SKU."""
+        el = self.swipe_to_either(L.cart_line(sku, upc))
         raw = el.get_attribute("content-desc") or ""
         parts = [p.strip() for p in raw.split("\n") if p.strip()]
         info = {"raw": raw}

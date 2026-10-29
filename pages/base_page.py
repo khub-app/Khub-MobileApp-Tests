@@ -1,6 +1,7 @@
 import time
 
 from appium.webdriver.common.appiumby import AppiumBy
+from selenium.common.exceptions import StaleElementReferenceException
 
 from utilities.logger import get_logger
 from utilities.screenshot_helper import take_screenshot
@@ -20,22 +21,40 @@ class BasePage:
     def find(self, locator, timeout=None):
         return self.wait.wait_for_visible(locator, timeout)
 
+    def _retry_stale(self, locator, timeout, action, attempts: int = 3):
+        """Re-locates `locator` fresh and runs `action(element)` on it,
+        retrying from scratch whenever the element goes stale between being
+        located and being acted on. This RN app frequently re-renders mid-
+        interaction (a list refresh, a debounced search), which invalidates
+        the already-found element reference - confirmed live 2026-10-21 on
+        both a plain tap and a type_text, in different screens, so this is
+        handled once here rather than patched at each call site."""
+        last_exc = None
+        for attempt in range(1, attempts + 1):
+            element = self.wait.wait_for_clickable(locator, timeout)
+            try:
+                return action(element)
+            except StaleElementReferenceException as e:
+                last_exc = e
+                logger.debug(f"Stale element on attempt {attempt}/{attempts} for {locator}, re-locating")
+                time.sleep(0.5)
+        raise last_exc
+
     def click(self, locator, timeout=None):
-        element = self.wait.wait_for_clickable(locator, timeout)
-        element.click()
-        return element
+        return self._retry_stale(locator, timeout, lambda el: (el.click(), el)[1])
 
     def type_text(self, locator, text: str, clear_first: bool = True, timeout=None):
-        element = self.wait.wait_for_clickable(locator, timeout)
-        # This app's React Native TextInputs only accept send_keys once they
-        # hold focus - tapping first is required, not optional (confirmed
-        # live: send_keys on an unfocused field is silently dropped and the
-        # form submits with "Please Enter ..." validation errors).
-        element.click()
-        if clear_first:
-            element.clear()
-        element.send_keys(text)
-        return element
+        def _type(element):
+            # This app's React Native TextInputs only accept send_keys once
+            # they hold focus - tapping first is required, not optional
+            # (confirmed live: send_keys on an unfocused field is silently
+            # dropped and the form submits with "Please Enter ..." errors).
+            element.click()
+            if clear_first:
+                element.clear()
+            element.send_keys(text)
+            return element
+        return self._retry_stale(locator, timeout, _type)
 
     def get_text(self, locator, timeout=None) -> str:
         return self.wait.wait_for_visible(locator, timeout).text
@@ -121,6 +140,19 @@ class BasePage:
             self._swipe(direction, percent)
             time.sleep(1)  # let the (possibly still-loading) list settle
         return self.find(locator, timeout=timeout)
+
+    def swipe_to_either(self, locator, max_swipes: int = 6, timeout: int = 20):
+        """Like swipe_to, but tries scrolling up first and, if that doesn't
+        surface `locator`, falls back to scrolling down. Useful when several
+        items were just added to a short list in sequence (e.g. UOM tier
+        cart lines) and the current scroll position relative to any one of
+        them isn't predictable - confirmed live 2026-10-29: a fixed
+        direction reliably found whichever end of a 4-line cart was already
+        near the viewport, but reliably missed the other end."""
+        try:
+            return self.swipe_to(locator, direction="up", max_swipes=max_swipes, timeout=timeout)
+        except Exception:
+            return self.swipe_to(locator, direction="down", max_swipes=max_swipes, timeout=timeout)
 
     def _swipe(self, direction: str = "up", percent: float = 0.6, speed: int = 3000):
         size = self.driver.get_window_size()

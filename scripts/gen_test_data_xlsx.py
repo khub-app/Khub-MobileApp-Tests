@@ -38,6 +38,7 @@ TAGS = [
     ("tests/login/test_login.py", "Yes", "Yes", "2026-09-03"),
     # Long multi-module E2E - regression only, not smoke.
     ("tests/fulfillment/test_online_sale_fulfillment.py", "No", "Yes", "2026-09-03"),
+    ("tests/fulfillment/test_uom_multi_unit_sale_fulfillment.py", "No", "Yes", "2026-10-29"),
 ]
 
 TEST_CONFIGS = [

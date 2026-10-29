@@ -36,11 +36,20 @@ class DriverManager:
             cmd += ["-s", self.config["udid"]]
         cmd += ["shell", "pm", "clear", app_package]
 
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            logger.warning(f"adb pm clear failed for {app_package}: {result.stderr.strip()}")
-        else:
-            logger.info(f"Cleared app data for {app_package}")
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            if result.returncode != 0:
+                logger.warning(f"adb pm clear failed for {app_package}: {result.stderr.strip()}")
+            else:
+                logger.info(f"Cleared app data for {app_package}")
+        except subprocess.TimeoutExpired:
+            # Confirmed live 2026-09-23: `adb shell pm clear` can hang
+            # indefinitely (no adb-side timeout of its own) right after a
+            # fresh emulator boot, blocking every class fixture forever with
+            # no error. Treat it as best-effort and move on rather than
+            # hanging the whole run - the class's login step still starts the
+            # app fresh even if stale data wasn't cleared this once.
+            logger.warning(f"adb pm clear timed out for {app_package} after 30s - continuing without it")
 
         self._ensure_connectivity()
 

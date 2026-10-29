@@ -49,6 +49,19 @@ class CreateSaleOrderLocators:
     ADD_TO_CART_BUTTON = (AID, "Add To Cart")
     NOTHING_IN_CART = (AID, "Nothing in cart")
 
+    # A UOM product (4 chained Piece/Pack/Case/Pallet tiers) shows this next
+    # to a cart line already holding one tier of that product - it opens a
+    # menu listing only the tiers NOT yet in the cart (by their configured
+    # label, e.g. "Box"/"Carton"/"Package"), each adding a new, separate
+    # cart line for that tier. Confirmed live 2026-10-29: this is the only
+    # way the app exposes more than one UOM tier on an order - there is no
+    # Unit selector before Add To Cart, only after.
+    ADD_ANOTHER_UNIT = (AID, "Add another unit")
+
+    @staticmethod
+    def unit_option(label: str):
+        return (AID, label)
+
     @staticmethod
     def product_result(sku: str):
         # search result row: content-desc "<name>\n<sku>\n$<price>"
@@ -58,20 +71,25 @@ class CreateSaleOrderLocators:
     SELECT_QTY_FIELD = (XP, '(//android.widget.EditText)[2]')
 
     @staticmethod
-    def cart_line(sku: str):
+    def cart_line(sku: str, upc: str | None = None):
         # cart line View: content-desc contains "<name>\n<cat>\n<sku>/<upc>\n
         # Qty: <avail>\nPrice *\nSale Price:$<p>\nOrder Qty *\nSub Total\n
         # $<sub>\nUnit *\nTotal: $<sub>"
-        return (UIA, f'new UiSelector().descriptionContains("{sku}/")')
+        # A UOM product's 4 tiers share one SKU, so "{sku}/" alone matches
+        # all of them - pass `upc` (unique per tier) to target exactly one.
+        desc = f"{sku}/{upc}" if upc else f"{sku}/"
+        return (UIA, f'new UiSelector().descriptionContains("{desc}")')
 
     @staticmethod
-    def cart_line_price_field(sku: str):
+    def cart_line_price_field(sku: str, upc: str | None = None):
+        desc = f"{sku}/{upc}" if upc else f"{sku}/"
         return (XP,
-                f'//android.view.View[contains(@content-desc,"{sku}/")]'
+                f'//android.view.View[contains(@content-desc,"{desc}")]'
                 f'//android.widget.EditText[1]')
 
     @staticmethod
-    def cart_line_qty_field(sku: str):
+    def cart_line_qty_field(sku: str, upc: str | None = None):
+        desc = f"{sku}/{upc}" if upc else f"{sku}/"
         return (XP,
-                f'//android.view.View[contains(@content-desc,"{sku}/")]'
+                f'//android.view.View[contains(@content-desc,"{desc}")]'
                 f'//android.widget.EditText[2]')

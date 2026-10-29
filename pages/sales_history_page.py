@@ -2,6 +2,7 @@ import re
 import time
 
 from appium.webdriver.common.appiumby import AppiumBy
+from selenium.common.exceptions import StaleElementReferenceException, WebDriverException
 
 from locators.sales_history_locators import SalesHistoryLocators
 from pages.base_page import BasePage
@@ -50,13 +51,23 @@ class SalesHistoryPage(BasePage):
         shut again instead of opening anything. This taps the FAB, and on
         each attempt either finds itself already on Create Sale Order, taps
         the "Sale Order" option if the dial opened, or - if neither
-        happened (a toggle-closed) - taps the FAB again."""
+        happened (a toggle-closed) - taps the FAB again.
+
+        The FAB also sits inside a list that can re-render mid-tap (e.g. a
+        Sales History row refresh), which occasionally staled the located
+        element between find and click - each attempt below tolerates that
+        rather than letting it crash the whole retry loop."""
         from pages.create_sale_order_page import CreateSaleOrderPage
 
         logger.info("Tapping the + FAB to create a sale order")
         page = CreateSaleOrderPage(self.driver)
         for attempt in range(1, 4):
-            self.click(SalesHistoryLocators.CREATE_FAB)
+            try:
+                self.click(SalesHistoryLocators.CREATE_FAB)
+            except (StaleElementReferenceException, WebDriverException) as e:
+                logger.info(f"FAB tap {attempt} hit a stale/transient element ({type(e).__name__}), retrying")
+                time.sleep(1)
+                continue
             time.sleep(1.5)
             if page.is_loaded(timeout=5):
                 return page

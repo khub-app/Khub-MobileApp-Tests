@@ -220,6 +220,41 @@ inputs. What IS available:
 - Other dialog confirm-button labels vary — `BasePage.tap_ok(labels=(...))`
   tries a list rather than hard-coding one.
 
+### UOM tier "Add another unit" flow (captured live 2026-10-29)
+- The product-step search/Add-To-Cart flow has **no Unit selector** before a
+  product is added — all 4 UOM tiers (Piece/Pack/Case/Pallet) share one SKU
+  and one search result, so the item always adds at the base Piece tier
+  first.
+- A cart line belonging to a UOM product shows an extra
+  `content-desc="Add another unit"` button next to it. Tapping it opens a
+  menu listing **only the tiers not yet in the cart**, by their configured
+  label (e.g. `content-desc="Box"` / `"Carton"` / `"Package"`) —
+  `CreateSaleOrderLocators.ADD_ANOTHER_UNIT` / `.unit_option(label)`. Tapping
+  a label adds that tier as a brand-new, separate cart line immediately —
+  there is no intermediate confirmation step.
+- **Order Qty on an already-placed cart line cannot be edited.** The
+  "Order Qty *" value renders as a plain `android.view.View` with a `text`
+  attribute, not an `EditText` — confirmed live by dumping the node tree and
+  by tapping it (nothing opens). Only the **first** tier gets a chosen
+  quantity, via the qty stepper shown before "Add To Cart" is tapped
+  (`CreateSaleOrderPage.add_product_by_sku`'s `qty` param). Every tier added
+  afterward via "Add another unit" is fixed at qty=1 by the app itself —
+  `CreateSaleOrderPage.add_product_all_uom_tiers` validates this as the real
+  behavior rather than forcing an unreachable quantity. (The cart line *does*
+  have one real `EditText` — the Sale Price field, index 1; "Order Qty" is
+  not index 2 as the pre-existing but never-exercised `cart_line_qty_field`/
+  `set_cart_quantity` assumed — left in place for if the app ever adds an
+  editable qty control, but not used by the UOM scenario.)
+- Because all 4 tiers share one SKU, a cart line is only unambiguously
+  addressable by **SKU + UPC** (`CreateSaleOrderLocators.cart_line(sku,
+  upc)`), never SKU alone.
+- The cart list auto-scrolls to reveal each newly-added line, so right after
+  adding all 4 tiers the viewport sits near the *last* one added (Pallet).
+  `BasePage.swipe_to`'s fixed scroll direction reliably reaches whichever end
+  was already closer, but not the other — use `BasePage.swipe_to_either`
+  (tries up, then down) rather than guessing a direction, whenever the
+  current scroll position relative to the target isn't known.
+
 ### Finding new locators
 ```
 venv\Scripts\python.exe scripts/inspect_app.py <tag>      # interactive: navigate, press Enter to dump
@@ -248,5 +283,6 @@ in `scripts/_inspect/`.
 |--------|-------|
 | **Login** | Valid login → Dashboard; empty-credentials validation errors |
 | **Sale Order + Fulfillment** | `tests/fulfillment/test_online_sale_fulfillment.py` — API-built customer + products (`online_sale.product_count` in `data/test_data.yaml`, default 2) → create & fully-pay (Cash) an **Online** sale → validate in Sales History + View Details → assign to me → pick all → pack all → confirm the same `SO-…` in the Packed section. One `test_NN_*` per UI step, shared class state, API test-data via `utilities/api_client.py` (`ApiClient`, ported from khub-pos-tests). Generated names come from `utilities/test_data_names.py` — a realistic business/product name + `QA-<YYMMDD>-<HHMMSS>-<rand>` tag (kept byte-identical across khub-pos-tests / khub-Ecom-tests). |
+| **UOM (multi-unit) Sale Order + Fulfillment** | `tests/fulfillment/test_uom_multi_unit_sale_fulfillment.py` — mirrors khub-web-tests' UOM multi-unit scenario (`PWkhubTest/UOM/test_uom_multi_unit_sale_fulfilment_validation_runner.py`). One product configured via the backend API with 4 chained packaging tiers (Piece/Pack/Case/Pallet, custom labels on the top 3 — `ApiClient.create_uom_product`, same payload shape as khub-web-tests' `scripts/create_uom_products_api.py`) is added to a single Online sale as 4 **separate** lines, fully paid, validated (per-tier price × qty = subtotal, cart summary totals, Sales History card, View Details line totals), then taken through the same assign → pick → pack → Packed lifecycle. See "UOM tier add-another-unit flow" below for the live app behavior this is built around. |
 
 Everything else (Sales, Customers, Profile, Scan) is future work.

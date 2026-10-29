@@ -19,6 +19,14 @@ class FulfillmentLocators:
     SEARCH_ICON = (UIA, 'new UiSelector().descriptionContains("Search")')
     SEARCH_FIELD = (XP, '(//android.widget.EditText)[1]')
 
+    # Sub-tabs under each status tab. Confirmed live 2026-09-16: a card's
+    # "Picker Detail" field only renders under Self Assigned - the default
+    # "All" sub-tab shows the same card with no Picker Detail field at all,
+    # assigned or not, so assignment must be verified there.
+    SUB_TAB_ALL = (UIA, 'new UiSelector().description("All")')
+    SUB_TAB_SELF_ASSIGNED = (UIA, 'new UiSelector().description("Self Assigned")')
+    SUB_TAB_UNASSIGNED = (UIA, 'new UiSelector().description("Unassigned")')
+
     @staticmethod
     def order_card(order_no: str):
         return (UIA, f'new UiSelector().descriptionContains("{order_no}")')

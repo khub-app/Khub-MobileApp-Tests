@@ -21,3 +21,30 @@ online_sale:
   quantities: [2, 3, 1, 1, 2]                          # cycled if count > len
   internal_note_prefix: "AUTO-INTERNAL"
   invoice_note_prefix: "AUTO-INVOICE"
+
+# E2E "UOM product (4 tiers) -> paid Online sale -> validate -> assign ->
+# pick -> pack" test. One product, configured with 4 chained packaging tiers
+# (Piece/Pack/Case/Pallet, custom labels on the top 3), added as 4 SEPARATE
+# order lines - mirrors khub-web-tests' UOM multi-unit scenario
+# (PWkhubTest/UOM/test_uom_multi_unit_sale_fulfilment_validation_runner.py).
+uom_sale:
+  order_type: "Online"
+  payment_mode: "Cash"
+  # Order Qty on a placed cart line has no editable control in this app build
+  # (confirmed live 2026-10-29 - the "Order Qty *" value is a plain read-only
+  # View, not an EditText, and nothing opens a qty editor for it). Only the
+  # FIRST tier (Piece) can get a chosen quantity, via the stepper shown
+  # before "Add To Cart" is tapped. Every tier added afterward through
+  # "Add another unit" is fixed at qty=1 - there is no UI path to anything
+  # else, so this is validated as the real, current app behavior rather than
+  # forced to match a quantity the app cannot produce.
+  piece_qty: 2
+  pack_desc: "Box"
+  case_desc: "Carton"
+  pallet_desc: "Package"
+  pack_qty: 5            # Pieces per Box
+  case_qty: 6            # Boxes per Carton
+  pallet_qty: 30         # Cartons per Package
+  base_cost: 10.00       # cost per Piece; other tiers scale from this
+  internal_note_prefix: "AUTO-INTERNAL-UOM"
+  invoice_note_prefix: "AUTO-INVOICE-UOM"
