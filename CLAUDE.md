@@ -198,10 +198,32 @@ inputs. What IS available:
   `EditText`; Order Type value renders as a `Button` (`Offsite`→ tap → pick
   `Online`); notes fields keyed by `hint="Notes (Internal)"` / `"Notes (Print on
   Invoice)"`; `Next` = `content-desc="Next"`.
-- **Product step**: search by SKU → tap the result (`descriptionContains(sku)`) →
+- **Product step**: search by UPC (not SKU - see below) → tap the result →
   set qty (2nd `EditText`) → `Add To Cart`. Cart line desc is
   "<name>\n<cat>\n<sku>/<upc>\nQty: <avail>\nPrice *\nSale Price:$<p>\nOrder Qty
   *\nSub Total\n$<sub>\nUnit *\nTotal: $<sub>".
+  - **Search by SKU is unreliable in this shared preprod catalog - search by
+    UPC instead.** `CreateSaleOrderPage.add_product_by_sku(..., upc=...)`
+    types the UPC when given. Two SKU-specific traps, both confirmed live
+    2026-11-03 on a catalog that had grown to ~18,000+ products across all
+    3 QA suites:
+    1. **Substring collision**: a short, sequential, auto-generated SKU
+       (e.g. `2572`) is a literal substring of other real SKUs (`25720`,
+       `25754`, ...) or even product names - a bare `descriptionContains(sku)`
+       match silently picks the WRONG product. Locators now anchor on the
+       newline around the SKU (`CreateSaleOrderLocators.product_result`,
+       `.cart_line`) to rule this out - but anchoring only fixes
+       *mismatches*, not the next problem:
+    2. **Crowded out of the results entirely**: with enough unrelated
+       products sharing that digit string somewhere, the exact SKU match can
+       fail to appear in search results AT ALL, for many minutes after
+       creation - looks identical to backend index lag (empty results,
+       `_search_product_result`'s retry loop exhausts the full
+       `search_timeout`) but no amount of waiting fixes it. Searching the
+       same product's UPC (random 10-digit, no realistic collision) finds it
+       immediately. If a `_search_product_result` failure message says
+       "crowded out", that's the cause - pass `upc=` at the call site rather
+       than retrying.
 - **Cart Summary / Payment**: totals are individual `content-desc` label+value
   pairs; success dialog text = "SaleOrder has been saved successfully.".
 - **Fulfillment**: tabs are `Pending (n)` / `Picking Paused (n)` / `Picked (n)`
@@ -211,6 +233,15 @@ inputs. What IS available:
 - **Assign**: tap the (unassigned) card → bottom sheet "This order not been
   assigned" → button **"Assign to me"** → info dialog "Order has been assigned
   to the user '<user>'." → OK.
+  - **`<user>` is the profile's display username, not the login credential**
+    - confirmed live 2026-11-03: logging in as `preprod`/`Password@123`
+    produced "...assigned to the user 'eaglews'." The authenticate response's
+    `entity.user.username` field ("eaglews") is the profile username; the
+    login field (`entity.user... login: "preprod"`, only visible by decoding
+    the JWT) is a separate thing. `ApiClient._login()` now captures the
+    profile username as `self.profile_username`, and both fulfillment tests
+    read `logged_in_user` from it at runtime (`test_01`) instead of assuming
+    it equals `data/test_data.yaml`'s login username.
 - **Pick**: reopen the assigned card → "Start Picking" → status-dialog OK →
   red **"Skip Scan Pick All"** → dialog 1 "…still some products to be picked…"
   → **Yes** → dialog 2 "Do you want to confirm picking your order?" →
@@ -255,6 +286,102 @@ inputs. What IS available:
   (tries up, then down) rather than guessing a direction, whenever the
   current scroll position relative to the target isn't known.
 
+### Promotions — mobile test data (cross-repo, captured 2026-11-09)
+
+The Admin app has **no Promotions screen** — confirmed live by dumping the
+nav drawer (flat items + the collapsible "Inventory" group): Home,
+Fulfillment, Sales History, Customers, Profile, Products, Daily Summary
+Report, Terms & Conditions, Contact KHUB, Stocks, Stock Locations, Expiring
+Soon, Purchase Order, Sales Return. Promotions are created/managed only on
+the web portal (`/tenant/api/v1/marketing/promotions`); mobile can only
+consume their effect on the Sale Order screen.
+
+Mobile tests therefore **never create a promotion or its product**. A
+prerequisite script in the sibling `khub-web-tests` repo does that:
+```
+python scripts/create_mobile_promotion_scenarios_api.py --env=preprod
+```
+(run from `khub-web-tests`, its own venv — takes well under a minute, pure
+API). It fully overwrites `khub-web-tests/testdata/mobile_promotion_scenarios_<env>.json`
+with fresh products/customer/promotion(s) for 4 scenarios
+(`multi_tier`, `phase2_boundary`, `repick`, `bxgy` — see
+`khub-web-tests/docs/mobile_promotion_api_handoff.md` for the full contract).
+`utilities/promotion_data.py` reads that file by absolute sibling-repo path
+(`get_scenario(name, env=...)`) — never hardcode a UPC/promotion name/id
+from an example run, they're stale the moment a new one runs. The promo
+products are plain UOM products (`create_uom_product` defaults: base_cost
+200, pack/case/pallet qty 5/6/30 → Piece $250/Pack $1250/Case $7500/Pallet
+$225000), so every existing UOM cart-flow method (`add_product_all_uom_tiers`,
+`get_cart_line`, etc.) applies unchanged — the data file just doesn't carry
+a SKU (it's created by a different repo/script), so resolve one at runtime
+via `ApiClient.get_product_by_upc(upc)`.
+
+### Promotions — live app behavior (captured 2026-11-09)
+
+A promoted cart line's content-desc adds up to 3 pieces of info to the
+plain shape (see `cart_line` above) — `CreateSaleOrderPage.get_cart_line`
+parses all of it:
+- A banner line right after `Qty: <avail>`: `"<promo name> · <percent>% off"`
+  on an actively-discounted line, or `"<promo name> · rewards line <n>"` on
+  a BXGY **trigger** line (never itself discounted — the promotion payload
+  sets `skip_discounted_trigger: true`).
+- Two extra bare `"$<amount>"` lines between `Sale Price:$<p>` and
+  `Order Qty *` (original price, then discounted price) — **only** when the
+  line's current qty is actually inside the promo's qualifying range. Outside
+  that range the banner and these two lines are **both** absent entirely,
+  even though the line is still promo-eligible (confirmed at qty 1 and qty 6
+  against a promo configured for qty 2–5 — no partial/clamped discount,
+  just none).
+- Under `Order Qty *`: `"Range: <min>–<max>"` for a Basic promo (shown
+  regardless of whether the current qty is in range), or `"Min: <trigger_qty>"`
+  / `"Max: <max_reward_qty>"` for a BXGY trigger/reward line respectively.
+- A line's own `"Sub Total"` is **always** qty × the undiscounted price —
+  on a discounted line this is NOT what the line is actually charged.
+  `"Total:"` is the real charged amount. Cart Summary's own `"Sub Total"`
+  already nets out every line's discount (it equals the sum of `Total:`,
+  not `Sub Total`, across lines) and adds a new `"Promo Savings"` field
+  (e.g. `"-$100.00"`) for the aggregate discount — `CartSummaryPage.get_promo_savings()`.
+  Like `get_tax`, the row is omitted entirely (not `"$0.00"`) when no line
+  has an active promotion.
+- Two overlapping Basic promotions on the same product auto-apply the
+  **higher** discount (confirmed: 15%/25% configured, 25% applied) — no
+  manual picker, nothing to switch.
+- BXGY: adding the reward product before the trigger qty is met shows a
+  plain, undiscounted line; adding the trigger at its qty re-evaluates the
+  *already-in-cart* reward line live and it becomes discounted — no need to
+  re-add or refresh it.
+- **View Details' own per-line "Extended" field is wrong for a discounted
+  line** — confirmed live: a line with Sale Price $250.00 × Order Qty 2 ×
+  "Discount 20.00%" showed `Extended $300.00`, not the correct $400.00 that
+  every other source of truth agrees on (the cart's own `Total:`, Cart
+  Summary's Sub Total/Grand Total, the Sales History card's Sale Total, and
+  this same order's own View Details order-level Sub Total, which only
+  reconciles against $400 for that line — not $300, which doesn't even sum
+  correctly into the order total). `$300.00 == $250 × 1.20` — the field
+  applies the discount percent with the wrong sign and ignores Order Qty.
+  This is a real app display bug in View Details, not a mobile automation
+  issue — `test_promotion_multi_tier.py`'s View Details step therefore only
+  checks non-discounted tier lines against it (and logs a warning for the
+  discounted one) rather than asserting a value the screen gets wrong.
+- **No cart line can be edited or removed once placed** — not just Order
+  Qty (already documented for UOM): the cart's "Show menu" button is a
+  single **order-level** control (`Search to Add Product` / `Search From
+  Cart` / `Dismiss menu`), not a per-line menu, and there is no other
+  remove/delete affordance on a line (`clickable="false"` on the whole
+  line element). To probe a promotion at several quantities,
+  `CreateSaleOrderPage.discard_order()` backs all the way out of the
+  in-progress order instead (Android back from step 1 opens a
+  "Confirmation" dialog; "Go Back" discards cleanly, confirmed safe across
+  several repeated fresh orders in one session) — see
+  `test_promotion_phase2_boundary.py`.
+- **Adding the same SKU+UPC to the cart a second time merges into the
+  existing line** (qty increments) rather than creating a duplicate —
+  confirmed live 2026-11-09. This is how `test_promotion_bxgy.py`
+  demonstrates a BXGY trigger crossing its qty threshold live (no qty-edit
+  or remove feature needed): add the trigger once below `trigger_qty`,
+  confirm the reward is still plain, add it again to push the same line's
+  qty up to `trigger_qty`, confirm the reward discounts live.
+
 ### Finding new locators
 ```
 venv\Scripts\python.exe scripts/inspect_app.py <tag>      # interactive: navigate, press Enter to dump
@@ -284,5 +411,6 @@ in `scripts/_inspect/`.
 | **Login** | Valid login → Dashboard; empty-credentials validation errors |
 | **Sale Order + Fulfillment** | `tests/fulfillment/test_online_sale_fulfillment.py` — API-built customer + products (`online_sale.product_count` in `data/test_data.yaml`, default 2) → create & fully-pay (Cash) an **Online** sale → validate in Sales History + View Details → assign to me → pick all → pack all → confirm the same `SO-…` in the Packed section. One `test_NN_*` per UI step, shared class state, API test-data via `utilities/api_client.py` (`ApiClient`, ported from khub-pos-tests). Generated names come from `utilities/test_data_names.py` — a realistic business/product name + `QA-<YYMMDD>-<HHMMSS>-<rand>` tag (kept byte-identical across khub-pos-tests / khub-Ecom-tests). |
 | **UOM (multi-unit) Sale Order + Fulfillment** | `tests/fulfillment/test_uom_multi_unit_sale_fulfillment.py` — mirrors khub-web-tests' UOM multi-unit scenario (`PWkhubTest/UOM/test_uom_multi_unit_sale_fulfilment_validation_runner.py`). One product configured via the backend API with 4 chained packaging tiers (Piece/Pack/Case/Pallet, custom labels on the top 3 — `ApiClient.create_uom_product`, same payload shape as khub-web-tests' `scripts/create_uom_products_api.py`) is added to a single Online sale as 4 **separate** lines, fully paid, validated (per-tier price × qty = subtotal, cart summary totals, Sales History card, View Details line totals), then taken through the same assign → pick → pack → Packed lifecycle. See "UOM tier add-another-unit flow" below for the live app behavior this is built around. |
+| **Promotions** | `tests/promotions/` — all 4 promotion-engine scenarios from the cross-repo data contract (see "Promotions — mobile test data" below), each a full Online sale, fully paid, validated end-to-end against the live cart/Cart Summary/Sales History/View Details: `test_promotion_multi_tier.py` (one Basic promotion across all 4 UOM tiers of one product), `test_promotion_phase2_boundary.py` (qty-range boundary — discount on at qty 2/3/5, off at 1/6, each a fresh discarded order except the one carried to checkout), `test_promotion_repick.py` (two overlapping promotions, the higher auto-applies — no switch/picker UI exists on this app, confirmed live, so none is exercised), `test_promotion_bxgy.py` (trigger product reaching its qty live-discounts a different reward product already in the cart). Mobile never creates any promotion or product itself — see "Promotions — mobile test data (cross-repo)" below for the full data contract and "Promotions — live app behavior" for what the cart/invoice actually show, including a confirmed View Details display bug on discounted lines. |
 
 Everything else (Sales, Customers, Profile, Scan) is future work.

@@ -1,4 +1,5 @@
 import random
+import time
 
 import requests
 
@@ -37,11 +38,11 @@ class ApiClient:
         )
         resp.raise_for_status()
         data = resp.json()
+        entity = data.get("entity") or data.get("data") or {}
         token = (
             data.get("access_token")
             or data.get("token")
-            or data.get("entity", {}).get("access_token")
-            or data.get("data", {}).get("access_token")
+            or entity.get("access_token")
         )
         if not token:
             raise RuntimeError(f"No access token in authenticate response: {str(data)[:300]}")
@@ -50,7 +51,15 @@ class ApiClient:
             "Content-Type": "application/json;charset=UTF-8",
             "Accept": "application/json, text/plain, */*",
         })
-        logger.info(f"Authenticated against backend API as '{self.config['username']}'")
+        # The login field (e.g. "preprod") and the profile's own display
+        # username (e.g. "eaglews") are two different things - confirmed
+        # live 2026-11-03, where an "Assign to me" confirmation named the
+        # profile username, not the login. Callers that need to match an
+        # app-displayed user name (assign/picker messages) should use this,
+        # not the login credential.
+        self.profile_username = (entity.get("user") or {}).get("username") or self.config["username"]
+        logger.info(f"Authenticated against backend API as '{self.config['username']}' "
+                    f"(profile username: '{self.profile_username}')")
 
     # ── catalog: category + channels + products ──────────────────────────
     def create_category(self, is_msa_compliant: bool = False, tag: str | None = None) -> dict:
@@ -390,6 +399,31 @@ class ApiClient:
             "upc": entity.get("upc"),
             "raw": entity,
         }
+
+    def get_product_by_upc(self, upc: str, timeout: int = 60) -> dict | None:
+        """Look up a product's backend id/SKU by UPC via the live catalog
+        search (list3). Needed for promotion-scenario products: their test
+        data file (utilities/promotion_data.py) carries only UPCs, since
+        they're created by a sibling repo's script, not this project's own
+        create_uom_product. Retries for `timeout`s since a just-created
+        product can briefly lag the search index (same class of delay
+        CreateSaleOrderPage.add_product_by_sku already works around on the
+        UI side)."""
+        url = self.base + "/tenant/api/v1/catalog/products/list3"
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            resp = self.session.get(url, params={
+                "search_key": upc, "is_group": 0, "page": 1, "page_size": 5,
+                "channel_id": 1, "category_ids": "", "brand_ids": "",
+                "show_default": "", "statuses": 1,
+            }, timeout=30)
+            resp.raise_for_status()
+            entities = resp.json().get("entities") or []
+            if entities:
+                e = entities[0]
+                return {"id": e.get("id"), "sku": e.get("sku"), "name": e.get("name"), "raw": e}
+            time.sleep(3)
+        return None
 
     # ── customer ────────────────────────────────────────────────────────
     def create_customer(self, is_msa_compliant: bool = False, tag: str | None = None) -> dict:

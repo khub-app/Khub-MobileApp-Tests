@@ -48,3 +48,19 @@ uom_sale:
   base_cost: 10.00       # cost per Piece; other tiers scale from this
   internal_note_prefix: "AUTO-INTERNAL-UOM"
   invoice_note_prefix: "AUTO-INVOICE-UOM"
+
+# Promotion-engine E2E tests - verify the Admin app's Sale Order screen
+# correctly surfaces promotional pricing (Basic %-off and BXGY) on a cart
+# line. Mobile does NOT create promotions or products itself here - a
+# prerequisite script in the sibling khub-web-tests repo
+# (scripts/create_mobile_promotion_scenarios_api.py --env=<env>) creates
+# fresh products/customer/promotion(s) for all 4 scenarios and writes them
+# to testdata/mobile_promotion_scenarios_<env>.json, which
+# utilities/promotion_data.py reads. See khub-web-tests/docs/
+# mobile_promotion_api_handoff.md for the full data contract.
+promotion_sale:
+  env: "preprod"          # which mobile_promotion_scenarios_<env>.json to read
+  order_type: "Online"
+  payment_mode: "Cash"
+  internal_note_prefix: "AUTO-INTERNAL-PROMO"
+  invoice_note_prefix: "AUTO-INVOICE-PROMO"

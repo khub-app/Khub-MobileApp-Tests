@@ -42,6 +42,13 @@ class CreateSaleOrderLocators:
 
     NEXT_BUTTON = (AID, "Next")
 
+    # Android back from step 1 opens a "Confirmation" dialog (Go Back /
+    # Cancel / Dismiss) offering to discard the in-progress order -
+    # confirmed live 2026-11-09, "Go Back" discards cleanly and returns to
+    # Sales History, safe to repeat across several fresh orders in one
+    # session (no stuck/incomplete order left behind).
+    CONFIRM_DISCARD = (AID, "Go Back")
+
     # ---- step 2: product selection ----
     PRODUCT_STEP_MARKER = (AID, "Add Product By Name / SKU / UPC")
     PRODUCT_SEARCH = (XP, '(//android.widget.EditText)[1]')  # hint "Search Product"
@@ -64,8 +71,14 @@ class CreateSaleOrderLocators:
 
     @staticmethod
     def product_result(sku: str):
-        # search result row: content-desc "<name>\n<sku>\n$<price>"
-        return (UIA, f'new UiSelector().descriptionContains("{sku}")')
+        # search result row: content-desc "<name>\n<sku>\n$<price>".
+        # The catalog's auto-generated SKUs are short sequential numbers, so
+        # a plain substring match is unsafe - SKU "2575" is a literal prefix
+        # of unrelated SKUs like "25750"/"25753"/"25754" (confirmed live
+        # 2026-11-03: this picked an entirely wrong product and silently
+        # added IT to the cart instead). The SKU always sits on its own
+        # line, so anchoring on the surrounding newlines is exact.
+        return (XP, f'//*[contains(@content-desc,"\n{sku}\n")]')
 
     # qty field on the selection popup (2nd EditText; 1st is the search box)
     SELECT_QTY_FIELD = (XP, '(//android.widget.EditText)[2]')
@@ -77,19 +90,23 @@ class CreateSaleOrderLocators:
         # $<sub>\nUnit *\nTotal: $<sub>"
         # A UOM product's 4 tiers share one SKU, so "{sku}/" alone matches
         # all of them - pass `upc` (unique per tier) to target exactly one.
-        desc = f"{sku}/{upc}" if upc else f"{sku}/"
-        return (UIA, f'new UiSelector().descriptionContains("{desc}")')
+        # Left-anchored on the newline before the SKU for the same reason as
+        # product_result: short sequential SKUs can otherwise be a substring
+        # match inside an unrelated, longer SKU (e.g. "2572/" inside
+        # "12572/...").
+        desc = f"\n{sku}/{upc}" if upc else f"\n{sku}/"
+        return (XP, f'//*[contains(@content-desc,"{desc}")]')
 
     @staticmethod
     def cart_line_price_field(sku: str, upc: str | None = None):
-        desc = f"{sku}/{upc}" if upc else f"{sku}/"
+        desc = f"\n{sku}/{upc}" if upc else f"\n{sku}/"
         return (XP,
                 f'//android.view.View[contains(@content-desc,"{desc}")]'
                 f'//android.widget.EditText[1]')
 
     @staticmethod
     def cart_line_qty_field(sku: str, upc: str | None = None):
-        desc = f"{sku}/{upc}" if upc else f"{sku}/"
+        desc = f"\n{sku}/{upc}" if upc else f"\n{sku}/"
         return (XP,
                 f'//android.view.View[contains(@content-desc,"{desc}")]'
                 f'//android.widget.EditText[2]')

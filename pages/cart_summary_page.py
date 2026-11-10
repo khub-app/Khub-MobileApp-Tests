@@ -53,8 +53,35 @@ class CartSummaryPage(BasePage):
     def get_additional_discount(self) -> float:
         return self._value_after("Additional Discount")
 
+    def get_promo_savings(self) -> float:
+        """Total promotion-engine discount across all cart lines, as a
+        NEGATIVE amount (e.g. "-$100.00" -> -100.0) - matches the sign the
+        UI itself shows. Confirmed live 2026-11-09: "Sub Total" already
+        nets this out (it is the post-discount total, unlike a line's own
+        "Sub Total" label), and "Additional Discount" is a separate, unrelated
+        manual-discount field. Like `get_tax`, the row is omitted entirely
+        (not shown as "$0.00") when no line in the cart has an active
+        promotion."""
+        descs = [d for d in self._descs() if d]
+        idxs = [i for i, d in enumerate(descs) if d == "Promo Savings"]
+        if not idxs:
+            return 0.0
+        for nxt in descs[idxs[-1] + 1:]:
+            s = nxt.strip()
+            if re.match(r"^-?\$?\s?[\d,]+(\.\d+)?$", s):
+                sign = -1.0 if s.startswith("-") else 1.0
+                return sign * parse_currency(s)
+        raise AssertionError("No numeric value after 'Promo Savings'")
+
     def get_tax(self) -> float:
-        return self._value_after("Tax")
+        # The app omits the "Tax" row entirely when tax is $0 (confirmed
+        # live 2026-11-03: Grand Total == Sub Total exactly, no Tax label
+        # anywhere in the summary) rather than showing "Tax $0.00" - not a
+        # bug, just nothing to add.
+        try:
+            return self._value_after("Tax")
+        except AssertionError:
+            return 0.0
 
     def get_grand_total(self) -> float:
         return self._value_after("Grand Total")

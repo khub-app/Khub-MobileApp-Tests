@@ -47,7 +47,11 @@ class TestOnlineSaleFulfillment(MobileBaseSetup):
     grand_total = None         # Decimal - captured live from Cart Summary
     tax = None                 # Decimal - captured live
     order_no = None
-    logged_in_user = TEST_DATA["login"]["valid"]["username"]
+    # Set for real in test_01 - the login credential ("preprod") and the
+    # profile's own display username (e.g. "eaglews") are two different
+    # things (confirmed live 2026-11-03): assign/picker messages in the app
+    # name the profile username, not the login.
+    logged_in_user = None
 
     sales_history = None
     cso = None
@@ -62,6 +66,7 @@ class TestOnlineSaleFulfillment(MobileBaseSetup):
     def test_01_prepare_test_data(self):
         with allure.step("Create customer + products through the backend API"):
             client = ApiClient()
+            TestOnlineSaleFulfillment.logged_in_user = client.profile_username
             data = client.create_online_sale_test_data(
                 prices=CFG["product_prices"],
                 quantities=CFG["quantities"],
@@ -127,7 +132,7 @@ class TestOnlineSaleFulfillment(MobileBaseSetup):
     def test_04_add_products(self):
         for p in self.products:
             with allure.step(f"Add SKU {p['sku']} (qty {p['qty']})"):
-                self.cso.add_product_by_sku(p["sku"], qty=p["qty"])
+                self.cso.add_product_by_sku(p["sku"], qty=p["qty"], upc=p["upc"])
         with allure.step("Every product is in the cart and each subtotal == price x qty"):
             for p in self.products:
                 assert self.cso.is_in_cart(p["sku"]), f"SKU {p['sku']} missing from cart"

@@ -58,7 +58,11 @@ class TestUomMultiUnitSaleFulfillment(MobileBaseSetup):
     grand_total = None
     tax = None
     order_no = None
-    logged_in_user = TEST_DATA["login"]["valid"]["username"]
+    # Set for real in test_01 - the login credential ("preprod") and the
+    # profile's own display username (e.g. "eaglews") are two different
+    # things (confirmed live 2026-11-03): assign/picker messages in the app
+    # name the profile username, not the login.
+    logged_in_user = None
 
     sales_history = None
     cso = None
@@ -73,6 +77,7 @@ class TestUomMultiUnitSaleFulfillment(MobileBaseSetup):
     def test_01_prepare_test_data(self):
         with allure.step("Create a UOM product (Piece/Pack/Case/Pallet) + customer through the backend API"):
             client = ApiClient()
+            TestUomMultiUnitSaleFulfillment.logged_in_user = client.profile_username
             category = client.create_category()
             channels = client.get_channels()
             product = client.create_uom_product(
