@@ -53,6 +53,17 @@ class CartSummaryPage(BasePage):
     def get_additional_discount(self) -> float:
         return self._value_after("Additional Discount")
 
+    def set_additional_discount(self, amount):
+        """Type a manual discount amount into the Additional Discount field
+        (hint="Additional Discount", confirmed live as an editable
+        EditText, unlike every other summary figure here). Hides the
+        keyboard afterward so the recalculated Grand Total renders."""
+        logger.info(f"Setting Additional Discount = {amount}")
+        self.swipe_to(L.ADDITIONAL_DISCOUNT_FIELD)
+        self.type_text(L.ADDITIONAL_DISCOUNT_FIELD, str(amount))
+        self.hide_keyboard()
+        return self
+
     def get_promo_savings(self) -> float:
         """Total promotion-engine discount across all cart lines, as a
         NEGATIVE amount (e.g. "-$100.00" -> -100.0) - matches the sign the

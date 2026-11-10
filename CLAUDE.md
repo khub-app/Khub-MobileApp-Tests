@@ -303,9 +303,16 @@ python scripts/create_mobile_promotion_scenarios_api.py --env=preprod
 ```
 (run from `khub-web-tests`, its own venv — takes well under a minute, pure
 API). It fully overwrites `khub-web-tests/testdata/mobile_promotion_scenarios_<env>.json`
-with fresh products/customer/promotion(s) for 4 scenarios
-(`multi_tier`, `phase2_boundary`, `repick`, `bxgy` — see
+with fresh products/customer/promotion(s) for 7 scenarios
+(`multi_tier`, `phase2_boundary`, `repick`, `bxgy`, `buy3_get2_half_off`,
+`validity_window`, `customer_targeting` — see
 `khub-web-tests/docs/mobile_promotion_api_handoff.md` for the full contract).
+`customer_targeting` is the one exception to "fresh every run": its
+Customer Group + member/non-member customers are a STABLE, manually-
+provisioned fixture (no API for creating a Customer Group was ever found —
+see that scenario's own builder docstring in the script for exactly how to
+recreate it if it's ever deleted). Its product and promotion are still
+fresh every run, same as everything else.
 `utilities/promotion_data.py` reads that file by absolute sibling-repo path
 (`get_scenario(name, env=...)`) — never hardcode a UPC/promotion name/id
 from an example run, they're stale the moment a new one runs. The promo
@@ -350,6 +357,21 @@ parses all of it:
   plain, undiscounted line; adding the trigger at its qty re-evaluates the
   *already-in-cart* reward line live and it becomes discounted — no need to
   re-add or refresh it.
+- **BXGY only works cross-product.** A self-referential BXGY (trigger and
+  reward pointing at the SAME product/unit, so there is only ever one cart
+  line for it) does NOT render any discount — confirmed live 2026-11-09:
+  the single resulting line shows the promotion's name with a bare
+  `"trigger"` tag and no discount at all, even once qty meets `trigger_qty`
+  (no banner, no discounted-price pair, Sub Total == Total for the full
+  undiscounted amount). The reward mechanism needs a structurally separate
+  line to attach its discount to.
+- **A BXGY reward line's qty vs. `max_reward_qty` is a hard on/off
+  boundary, not partial** — confirmed live 2026-11-09 (trigger_qty=3,
+  max_reward_qty=2, 50% off): at reward qty <= `max_reward_qty` every unit
+  on that line discounts; at reward qty > `max_reward_qty` the line is
+  **completely plain** - no banner, no `"Max:"` indicator, nothing. This
+  differs from a Basic promo's `"Range:"` line, which stays visible even
+  when the current qty is out of range.
 - **View Details' own per-line "Extended" field is wrong for a discounted
   line** — confirmed live: a line with Sale Price $250.00 × Order Qty 2 ×
   "Discount 20.00%" showed `Extended $300.00`, not the correct $400.00 that
@@ -381,6 +403,45 @@ parses all of it:
   or remove feature needed): add the trigger once below `trigger_qty`,
   confirm the reward is still plain, add it again to push the same line's
   qty up to `trigger_qty`, confirm the reward discounts live.
+- **Self-referential BXGY does not work at all** — a promotion whose
+  trigger AND reward point at the same product/unit (so there is only ever
+  one cart line for it) shows that line with a bare `"<promo name> ·
+  trigger"` tag and **zero** discount, even once qty meets `trigger_qty` —
+  confirmed live 2026-11-09. The reward mechanism needs a structurally
+  separate line to attach its discount to; `buy3_get2_half_off` is built
+  cross-product (two different products) specifically because of this.
+- **Cart Summary's Promo Savings correctly sums MULTIPLE independent,
+  simultaneously-active promotions** across different lines in one order —
+  confirmed live 2026-11-10 with 3 different promotions (two Basic, one
+  BXGY reward) in a single cart: the aggregate figure is the exact sum of
+  each line's own discount, not just whichever applied last.
+- **A manual "Additional Discount" (Cart Summary's own editable
+  `ADDITIONAL_DISCOUNT_FIELD`) stacks cleanly on top of an active
+  promotion** — confirmed live 2026-11-10: entering it leaves the
+  promo-discounted Sub Total AND Promo Savings completely unchanged: it
+  only reduces Grand Total by exactly the entered amount. No double-
+  discount, no clobbering of the promo - the two mechanisms are fully
+  independent. `CartSummaryPage.set_additional_discount(amount)`.
+- **A promotion outside its time window (not yet started, or already
+  ended) shows nothing at all** — confirmed live 2026-11-10: no banner, no
+  discounted-price pair, and (unlike a qty-range-ineligible Basic promo,
+  which still shows its `"Range:"` indicator) not even that. Same as a
+  customer-ineligible promotion (see Customer Group targeting below) - a
+  temporally- or customer-ineligible promotion leaves no trace on the line
+  at all, while a qty-ineligible one still shows its range.
+- **A promotion scoped to a Customer Group (`applicable_to: 3`,
+  `customer_group_ids: [<id>]` in the `POST .../marketing/promotions`
+  payload - confirmed live 2026-11-10 by creating one through the real
+  portal UI, Marketing > Promotions > Create Promotion > "Apply To" >
+  "Only customers within the following Customer Groups", and reading it
+  back via `GET .../marketing/promotions/list`) only discounts for
+  customers in that group** — a customer outside it sees a completely
+  plain line, same "no trace at all" behavior as the time-window case
+  above. No API endpoint for *creating* a Customer Group was found (the
+  portal's own create-group flow never surfaced a capturable request), so
+  that part of the fixture is manually provisioned once rather than
+  recreated per run — see `create_mobile_promotion_scenarios_api.py`'s
+  `_scenario_customer_targeting` docstring for the exact recreation steps.
 
 ### Finding new locators
 ```
@@ -411,6 +472,57 @@ in `scripts/_inspect/`.
 | **Login** | Valid login → Dashboard; empty-credentials validation errors |
 | **Sale Order + Fulfillment** | `tests/fulfillment/test_online_sale_fulfillment.py` — API-built customer + products (`online_sale.product_count` in `data/test_data.yaml`, default 2) → create & fully-pay (Cash) an **Online** sale → validate in Sales History + View Details → assign to me → pick all → pack all → confirm the same `SO-…` in the Packed section. One `test_NN_*` per UI step, shared class state, API test-data via `utilities/api_client.py` (`ApiClient`, ported from khub-pos-tests). Generated names come from `utilities/test_data_names.py` — a realistic business/product name + `QA-<YYMMDD>-<HHMMSS>-<rand>` tag (kept byte-identical across khub-pos-tests / khub-Ecom-tests). |
 | **UOM (multi-unit) Sale Order + Fulfillment** | `tests/fulfillment/test_uom_multi_unit_sale_fulfillment.py` — mirrors khub-web-tests' UOM multi-unit scenario (`PWkhubTest/UOM/test_uom_multi_unit_sale_fulfilment_validation_runner.py`). One product configured via the backend API with 4 chained packaging tiers (Piece/Pack/Case/Pallet, custom labels on the top 3 — `ApiClient.create_uom_product`, same payload shape as khub-web-tests' `scripts/create_uom_products_api.py`) is added to a single Online sale as 4 **separate** lines, fully paid, validated (per-tier price × qty = subtotal, cart summary totals, Sales History card, View Details line totals), then taken through the same assign → pick → pack → Packed lifecycle. See "UOM tier add-another-unit flow" below for the live app behavior this is built around. |
-| **Promotions** | `tests/promotions/` — all 4 promotion-engine scenarios from the cross-repo data contract (see "Promotions — mobile test data" below), each a full Online sale, fully paid, validated end-to-end against the live cart/Cart Summary/Sales History/View Details: `test_promotion_multi_tier.py` (one Basic promotion across all 4 UOM tiers of one product), `test_promotion_phase2_boundary.py` (qty-range boundary — discount on at qty 2/3/5, off at 1/6, each a fresh discarded order except the one carried to checkout), `test_promotion_repick.py` (two overlapping promotions, the higher auto-applies — no switch/picker UI exists on this app, confirmed live, so none is exercised), `test_promotion_bxgy.py` (trigger product reaching its qty live-discounts a different reward product already in the cart). Mobile never creates any promotion or product itself — see "Promotions — mobile test data (cross-repo)" below for the full data contract and "Promotions — live app behavior" for what the cart/invoice actually show, including a confirmed View Details display bug on discounted lines. |
+| **Promotions** | `tests/promotions/` — 9 promotion-engine scenarios from the cross-repo data contract (see "Promotions — mobile test data" below), each a full Online sale, fully paid, validated end-to-end against the live cart/Cart Summary/Sales History/View Details: `test_promotion_multi_tier.py` (one Basic promotion across all 4 UOM tiers of one product), `test_promotion_phase2_boundary.py` (qty-range boundary — discount on at qty 2/3/5, off at 1/6, each a fresh discarded order except the one carried to checkout), `test_promotion_repick.py` (two overlapping promotions, the higher auto-applies — no switch/picker UI exists on this app, confirmed live, so none is exercised), `test_promotion_bxgy.py` (trigger product reaching its qty live-discounts a different reward product already in the cart), `test_promotion_buy3_get2.py` (same BXGY mechanism, trigger_qty=3/max_reward_qty=2/50% — additionally proves the reward-qty upper boundary is a hard on/off, not partial), `test_promotion_multi_promo_cart.py` (3 independent promotions in one cart — Cart Summary's Promo Savings correctly sums all 3, reusing existing scenario products rather than new data), `test_promotion_additional_discount_stacking.py` (a manual Additional Discount stacks cleanly on top of an active promo — independent fields, no double-counting), `test_promotion_validity_window.py` (a not-yet-started or already-expired promotion applies no discount at all), `test_promotion_customer_targeting.py` (a promotion scoped to one Customer Group discounts only its members, confirmed negative for a non-member customer). Mobile never creates any promotion or product itself — see "Promotions — mobile test data (cross-repo)" below for the full data contract and "Promotions — live app behavior" for what the cart/invoice actually show, including a confirmed View Details display bug on discounted lines, a confirmed non-working self-referential-BXGY configuration, and the Customer Group targeting fixture. |
 
 Everything else (Sales, Customers, Profile, Scan) is future work.
+
+### Sales Return — investigated 2026-11-10, NOT YET automatable
+
+A 5th promotion scenario ("return a promoted order and confirm the refund
+reflects the discounted amount actually paid") was attempted and could not
+be completed - not a quality gap, a genuine missing prerequisite. Full
+findings, so this isn't re-investigated from scratch later:
+
+- `DashboardPage.go_to_sales_return()` / `NavDrawerPage.go_to_sales_return()`
+  exist, are tested, and work (Sales Return sits inside the collapsible
+  "Inventory" drawer group, same as Stock Locations etc. - see
+  `NavDrawerLocators.INVENTORY_EXPANDER_COLLAPSED`).
+- That screen is a **read-only log of already-completed returns** - cards
+  show `Return Number RE-...` / `Invoice Total` / `Business Name` etc. in
+  the usual flattened content-desc shape, but there is no FAB or any other
+  control to start a new one. `pages/sales_return_page.py` reflects this
+  (read-only for now).
+- Exhaustively checked every other plausible entry point, live, on both the
+  mobile app and the web portal (Chrome automation, logged in as the same
+  preprod tenant): a Sales History order card's "Show menu" (checked on
+  both a Pending and a fully-Packed order) only offers View Details/Print
+  Invoice/Send Email; Order Details' own tabs (Order Detail/Payment
+  History) have nothing either.
+- On the **web portal**, the equivalent action (Sales History row's "..."
+  menu → "Return") exists, but **only appears once an order's Order Status
+  reaches "Completed"** - confirmed by comparing a `Packed`/`Ready For
+  Delivery` order (no Return option) against an unrelated, pre-existing
+  `Completed` order (Return option present). This project's own Fulfillment
+  automation only ever drives an order to **Packed** - reaching Completed
+  needs the separate Delivery & Shipping execute/deliver flow, which has
+  never been explored or automated here. That's the real prerequisite
+  blocking this scenario, on mobile or web.
+- No API shortcut was found either (checked both sibling repos for an
+  "execute"/"deliver"/"complete order" script, the way Promotions has
+  `create_mobile_promotion_scenarios_api.py` - nothing exists).
+- Actually clicking the web portal's own "Complete Return" button (to learn
+  the finalize payload, the same way the Promotions API was reverse-
+  engineered) was correctly blocked by the permission system: that is a
+  real, irreversible refund transaction against a real order, executed by
+  direct browser action outside this project's own sandboxed Appium test
+  framework - not something to click through directly, unlike the safe,
+  isolated QA-tagged data this project creates everywhere else. That
+  confirmation request was not completed; the draft return it started was
+  abandoned, not finished.
+
+**To unblock this in the future**: either (a) automate the Delivery &
+Shipping execute/deliver flow first (a prerequisite module in its own
+right, comparable in scope to Fulfillment's own pick/pack), or (b) find/
+build a backend API that marks an order Completed without the UI flow
+(mirroring how Promotions bypasses its own UI) - worth asking the web/QA
+side about directly, the way the promotion payloads were handed off.

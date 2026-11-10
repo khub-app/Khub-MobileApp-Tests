@@ -43,6 +43,11 @@ TAGS = [
     ("tests/promotions/test_promotion_phase2_boundary.py", "No", "Yes", "2026-11-09"),
     ("tests/promotions/test_promotion_repick.py", "No", "Yes", "2026-11-09"),
     ("tests/promotions/test_promotion_bxgy.py", "No", "Yes", "2026-11-09"),
+    ("tests/promotions/test_promotion_buy3_get2.py", "No", "Yes", "2026-11-09"),
+    ("tests/promotions/test_promotion_multi_promo_cart.py", "No", "Yes", "2026-11-10"),
+    ("tests/promotions/test_promotion_additional_discount_stacking.py", "No", "Yes", "2026-11-10"),
+    ("tests/promotions/test_promotion_validity_window.py", "No", "Yes", "2026-11-10"),
+    ("tests/promotions/test_promotion_customer_targeting.py", "No", "Yes", "2026-11-10"),
 ]
 
 TEST_CONFIGS = [

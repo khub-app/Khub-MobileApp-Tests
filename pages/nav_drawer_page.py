@@ -38,6 +38,17 @@ class NavDrawerPage(BasePage):
         self.click(NavDrawerLocators.FULFILLMENT)
         return FulfillmentPage(self.driver)
 
+    def go_to_sales_return(self):
+        from pages.sales_return_page import SalesReturnPage
+
+        logger.info("Navigating to Sales Return")
+        self.open()
+        if self._present(NavDrawerLocators.INVENTORY_EXPANDER_COLLAPSED):
+            self.click(NavDrawerLocators.INVENTORY_EXPANDER_COLLAPSED)
+            self.find(NavDrawerLocators.SALES_RETURN, timeout=10)
+        self.click(NavDrawerLocators.SALES_RETURN)
+        return SalesReturnPage(self.driver)
+
     def go_to_dashboard(self):
         from pages.dashboard_page import DashboardPage
 

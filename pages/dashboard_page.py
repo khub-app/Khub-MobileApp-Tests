@@ -37,3 +37,8 @@ class DashboardPage(BasePage):
         from pages.nav_drawer_page import NavDrawerPage
 
         return NavDrawerPage(self.driver).go_to_fulfillment()
+
+    def go_to_sales_return(self):
+        from pages.nav_drawer_page import NavDrawerPage
+
+        return NavDrawerPage(self.driver).go_to_sales_return()
