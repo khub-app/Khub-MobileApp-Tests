@@ -31,6 +31,7 @@ from utilities import promotion_data
 from utilities.api_client import ApiClient
 from utilities.currency import money
 from utilities.logger import get_logger
+from utilities.promotion_asserts import assert_promo_state
 
 logger = get_logger(__name__)
 
@@ -40,6 +41,7 @@ with open("data/test_data.yaml", "r", encoding="utf-8") as f:
 CFG = TEST_DATA["promotion_sale"]
 
 
+@allure.suite("Marketing Promotions")
 @allure.feature("Promotions")
 @allure.story("Basic promotion, 4 UOM tiers -> 4 discounted order lines -> Sales History")
 @pytest.mark.promotion
@@ -156,10 +158,10 @@ class TestPromotionMultiTier(MobileBaseSetup):
             with allure.step(f"Tier '{t['label']}' (qty={t['qty']}, "
                               f"{'in' if in_range else 'OUT of'} promo range): "
                               f"validate discount {'applies' if in_range else 'does NOT apply'}"):
-                assert line["is_promo_active"] == in_range, (
-                    f"Tier '{t['label']}' promo-active={line['is_promo_active']} "
-                    f"but qty {t['qty']} is {'inside' if in_range else 'outside'} "
-                    f"[{self.qty_min},{self.qty_max}]: {line}")
+                assert_promo_state(line, in_range, (
+                    f"Tier '{t['label']}': qty {t['qty']} is "
+                    f"{'inside' if in_range else 'outside'} "
+                    f"[{self.qty_min},{self.qty_max}] - "))
                 base_price = money(line["sale_price"])
                 expected_line_subtotal = money(base_price * t["qty"])
                 assert money(line["sub_total"]) == expected_line_subtotal, (

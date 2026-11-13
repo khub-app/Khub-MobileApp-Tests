@@ -127,3 +127,35 @@ class SalesHistoryPage(BasePage):
         self.tap_ok(labels=("View Details", "View Detail", "View Order", "Order Details",
                             "Details", "View"), timeout=15)
         return OrderDetailsPage(self.driver)
+
+    def open_print_invoice(self, order_no: str):
+        """Actions -> Print Invoice. Confirmed live 2026-11-13: this opens
+        the invoice as a real web page in the device's own Chrome browser
+        (a separate app/task - NOT a WebView embedded in the admin app),
+        not a screen inside this app - see PrintInvoicePage for everything
+        that implies (Chrome's one-time first-run screen, scrolling needed
+        before its content is readable, and how to get back to the app).
+
+        The "Show menu" tap occasionally doesn't open the popup (the same
+        kind of transient list-tap miss documented on tap_create_sale_order)
+        - retries the whole tap sequence rather than hanging on a single
+        attempt's 60s wait for "Print Invoice" to appear."""
+        from pages.print_invoice_page import PrintInvoicePage
+
+        logger.info(f"Opening actions -> Print Invoice for {order_no}")
+        for attempt in range(1, 4):
+            try:
+                self.swipe_to(SalesHistoryLocators.order_card(order_no))
+                self.click(SalesHistoryLocators.order_card_actions(order_no))
+                time.sleep(1)
+                if self.is_displayed(SalesHistoryLocators.PRINT_INVOICE, timeout=10):
+                    self.click(SalesHistoryLocators.PRINT_INVOICE)
+                    return PrintInvoicePage(self.driver)
+            except (StaleElementReferenceException, WebDriverException) as e:
+                logger.info(f"Print Invoice tap {attempt} hit a stale/transient element ({type(e).__name__}), retrying")
+            logger.info(f"'Print Invoice' menu item not shown yet (attempt {attempt}), retrying 'Show menu'")
+
+        assert self.is_displayed(SalesHistoryLocators.PRINT_INVOICE, timeout=10), \
+            "'Print Invoice' menu item never appeared"
+        self.click(SalesHistoryLocators.PRINT_INVOICE)
+        return PrintInvoicePage(self.driver)

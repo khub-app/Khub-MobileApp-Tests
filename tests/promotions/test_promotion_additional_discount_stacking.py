@@ -28,6 +28,7 @@ from utilities import promotion_data
 from utilities.api_client import ApiClient
 from utilities.currency import money, parse_currency
 from utilities.logger import get_logger
+from utilities.promotion_asserts import assert_promo_state
 
 logger = get_logger(__name__)
 
@@ -38,6 +39,7 @@ CFG = TEST_DATA["promotion_sale"]
 ADDITIONAL_DISCOUNT = Decimal("30.00")
 
 
+@allure.suite("Marketing Promotions")
 @allure.feature("Promotions")
 @allure.story("Manual Additional Discount stacks cleanly on top of an active promotion")
 @pytest.mark.promotion
@@ -119,7 +121,7 @@ class TestPromotionAdditionalDiscountStacking(MobileBaseSetup):
             self.cso.add_product_by_sku(self.sku, qty=self.qty_min, upc=self.piece_upc)
         with allure.step("Cart line is actively discounted"):
             line = self.cso.get_cart_line(self.sku, upc=self.piece_upc)
-            assert line["is_promo_active"], f"Expected an active discount: {line}"
+            assert_promo_state(line, True, "Expected an active discount - ")
             assert line["promo_name"] == self.promo_name
             assert line["promo_percent"] == self.reward_percent
         with allure.step("Next -> Cart Summary"):

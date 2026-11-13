@@ -28,6 +28,7 @@ from utilities import promotion_data
 from utilities.api_client import ApiClient
 from utilities.currency import money, parse_currency
 from utilities.logger import get_logger
+from utilities.promotion_asserts import assert_promo_state
 
 logger = get_logger(__name__)
 
@@ -38,6 +39,7 @@ CFG = TEST_DATA["promotion_sale"]
 QTY = 3
 
 
+@allure.suite("Marketing Promotions")
 @allure.feature("Promotions")
 @allure.story("A not-yet-started or already-expired promotion applies NO discount")
 @pytest.mark.promotion
@@ -119,8 +121,8 @@ class TestPromotionValidityWindow(MobileBaseSetup):
             with allure.step(f"Add '{label}' product at qty={QTY} - must be plain"):
                 self.cso.add_product_by_sku(sku, qty=QTY, upc=upc)
                 line = self.cso.get_cart_line(sku, upc=upc)
-                assert not line["is_promo_active"], (
-                    f"'{label}' promotion applied a discount outside its time window: {line}")
+                assert_promo_state(line, False,
+                    f"'{label}' promotion should be outside its time window - ")
                 assert "promo_name" not in line, (
                     f"'{label}' line shows a promo tag at all (expected none): {line}")
                 expected_full = money(line["sale_price"] * QTY)

@@ -51,6 +51,19 @@ class PickingPage(BasePage):
         time.sleep(2)
         return self
 
+    def is_product_label_present(self, label_name: str, timeout: int = 15) -> bool:
+        """Checks the active "To Pick" list's per-product "Labels:" row for a
+        Label Management label by its exact name (confirmed live 2026-11-12:
+        this chip, not the order-summary card's unrelated "Tags" feature, is
+        where a product's show_on_fulfillment=True label actually renders)."""
+        return self.is_displayed(L.product_label_chip(label_name), timeout)
+
+    def get_product_label_bg_color(self, label_name: str, timeout: int = 15):
+        """Samples the rendered background color of a product label chip on
+        the active Picking list, for visually verifying it matches the
+        label's configured bg_color - content-desc carries no color info."""
+        return self.get_element_color(L.product_label_chip(label_name), timeout=timeout)
+
     def is_all_picked(self, timeout: int = 40) -> bool:
         """Picking succeeded once the flow offers the packing stage."""
         return self.is_displayed(L.START_PACKING, timeout)

@@ -190,6 +190,31 @@ class BasePage:
     def take_screenshot(self, name: str) -> str:
         return take_screenshot(self.driver, name)
 
+    def get_element_color(self, locator, point: tuple = (0.5, 0.5), timeout=None):
+        """Sample one pixel's RGB from inside `locator`'s own rendered area -
+        for visually verifying a rendered color (background/text) that
+        content-desc text alone can't carry, e.g. a Label Management chip's
+        configured background/text color. `point` is an (x_ratio, y_ratio)
+        offset within the element, each 0..1; default samples the center.
+        Returns an (r, g, b) tuple - compare with utilities.color_utils.colors_close.
+
+        Uses the element's own screenshot_as_png (not a full-screen shot plus
+        manually-read location/size) - confirmed live 2026-11-12 that a
+        separate full-screen screenshot call can land a scroll-tick after the
+        element's location/size were read, especially on a RN screen that
+        auto-settles after a tap, silently sampling the WRONG area (e.g. a
+        sibling element that scrolled into that same pixel position) rather
+        than erroring. The element's own screenshot has no such race."""
+        from io import BytesIO
+
+        from PIL import Image
+
+        element = self.wait.wait_for_visible(locator, timeout)
+        img = Image.open(BytesIO(element.screenshot_as_png)).convert("RGB")
+        x = min(int(img.width * point[0]), img.width - 1)
+        y = min(int(img.height * point[1]), img.height - 1)
+        return img.getpixel((x, y))
+
     def dismiss_system_anr_if_present(self, max_attempts: int = 3):
         """React Native apps occasionally trip Android's "System UI isn't
         responding" / "App isn't responding" ANR watchdog on a cold launch -

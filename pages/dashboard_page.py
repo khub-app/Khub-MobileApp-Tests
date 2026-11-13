@@ -23,6 +23,14 @@ class DashboardPage(BasePage):
     def open_customers(self):
         return self.open_tab(DashboardLocators.TAB_CUSTOMERS)
 
+    def open_profile(self):
+        from pages.profile_page import ProfilePage
+
+        self.open_tab(DashboardLocators.TAB_PROFILE)
+        page = ProfilePage(self.driver)
+        assert page.is_loaded(), "Profile page did not open"
+        return page
+
     def open_nav_drawer(self):
         from pages.nav_drawer_page import NavDrawerPage
 

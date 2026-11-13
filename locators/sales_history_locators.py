@@ -40,3 +40,4 @@ class SalesHistoryLocators:
 
     # Actions popup menu entries (content-desc)
     VIEW_DETAILS = (AppiumBy.ACCESSIBILITY_ID, "View Details")
+    PRINT_INVOICE = (AppiumBy.ACCESSIBILITY_ID, "Print Invoice")

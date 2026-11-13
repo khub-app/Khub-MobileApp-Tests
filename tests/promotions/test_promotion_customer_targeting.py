@@ -38,6 +38,7 @@ from utilities import promotion_data
 from utilities.api_client import ApiClient
 from utilities.currency import money, parse_currency
 from utilities.logger import get_logger
+from utilities.promotion_asserts import assert_promo_state
 
 logger = get_logger(__name__)
 
@@ -48,6 +49,7 @@ CFG = TEST_DATA["promotion_sale"]
 QTY = 2
 
 
+@allure.suite("Marketing Promotions")
 @allure.feature("Promotions")
 @allure.story("A promotion scoped to a Customer Group only discounts for members of that group")
 @pytest.mark.promotion
@@ -117,9 +119,8 @@ class TestPromotionCustomerTargeting(MobileBaseSetup):
             cso = self._open_fresh_order_to_product_step(self.out_of_group_customer)
             cso.add_product_by_sku(self.sku, qty=QTY, upc=self.piece_upc)
             line = cso.get_cart_line(self.sku, upc=self.piece_upc)
-            assert not line["is_promo_active"], (
-                f"Out-of-group customer '{self.out_of_group_customer}' was discounted - "
-                f"promotion leaked outside its Customer Group: {line}")
+            assert_promo_state(line, False,
+                f"Out-of-group customer '{self.out_of_group_customer}' should not be discounted - ")
             assert "promo_name" not in line, (
                 f"Out-of-group customer's line shows a promo tag at all (expected none): {line}")
             expected_full = money(line["sale_price"] * QTY)
@@ -138,8 +139,8 @@ class TestPromotionCustomerTargeting(MobileBaseSetup):
             TestPromotionCustomerTargeting.cso = cso
         with allure.step("Line is discounted, same promo/percent as configured"):
             line = cso.get_cart_line(self.sku, upc=self.piece_upc)
-            assert line["is_promo_active"], (
-                f"In-group customer '{self.in_group_customer}' was NOT discounted: {line}")
+            assert_promo_state(line, True,
+                f"In-group customer '{self.in_group_customer}' should be discounted - ")
             assert line["promo_name"] == self.promo_name
             assert line["promo_percent"] == self.reward_percent
             from decimal import Decimal

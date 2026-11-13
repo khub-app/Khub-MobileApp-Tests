@@ -36,6 +36,7 @@ from utilities import promotion_data
 from utilities.api_client import ApiClient
 from utilities.currency import money, parse_currency
 from utilities.logger import get_logger
+from utilities.promotion_asserts import assert_promo_state
 
 logger = get_logger(__name__)
 
@@ -45,6 +46,7 @@ with open("data/test_data.yaml", "r", encoding="utf-8") as f:
 CFG = TEST_DATA["promotion_sale"]
 
 
+@allure.suite("Marketing Promotions")
 @allure.feature("Promotions")
 @allure.story("BXGY - trigger product qty met -> a DIFFERENT reward product is discounted")
 @pytest.mark.promotion
@@ -135,7 +137,7 @@ class TestPromotionBxgy(MobileBaseSetup):
             self.cso.add_product_by_sku(self.reward_sku, qty=1, upc=self.reward_upc)
         with allure.step("Line is plain - no promo banner, Sub Total == Total"):
             line = self.cso.get_cart_line(self.reward_sku, upc=self.reward_upc)
-            assert not line["is_promo_active"], f"Reward line already discounted with no trigger in cart: {line}"
+            assert_promo_state(line, False, "Reward line already discounted with no trigger in cart - ")
             assert money(line["sub_total"]) == money(line["line_total"]), (
                 f"Plain line Sub Total {line.get('sub_total')} != Total {line.get('line_total')}")
             TestPromotionBxgy.reward_base_price = money(line["sale_price"])
@@ -150,9 +152,9 @@ class TestPromotionBxgy(MobileBaseSetup):
             self.cso.add_product_by_sku(self.trigger_sku, qty=below_qty, upc=self.trigger_upc)
         with allure.step("Reward line is still plain/undiscounted"):
             line = self.cso.get_cart_line(self.reward_sku, upc=self.reward_upc)
-            assert not line["is_promo_active"], (
+            assert_promo_state(line, False, (
                 f"Reward discounted before trigger_qty ({self.trigger_qty}) was met "
-                f"(trigger qty={below_qty}): {line}")
+                f"(trigger qty={below_qty}) - "))
 
     # ---------------- Part 5: trigger meets threshold - reward live-pairs #
     @allure.title("Push the trigger to meet trigger_qty - reward line discounts LIVE")
@@ -165,8 +167,8 @@ class TestPromotionBxgy(MobileBaseSetup):
             assert trig_line["available"] is not None  # sanity: a real line, not a stale handle
             # skip_discounted_trigger: true - the trigger itself never gets
             # the "N% off" banner/price-pair, only a "rewards line <n>" tag.
-            assert not trig_line["is_promo_active"], (
-                f"Trigger line itself should never be discounted (skip_discounted_trigger): {trig_line}")
+            assert_promo_state(trig_line, False,
+                "Trigger line itself should never be discounted (skip_discounted_trigger) - ")
             assert trig_line.get("promo_name") == self.promo_name, (
                 f"Trigger line promo name {trig_line.get('promo_name')!r} != {self.promo_name!r}")
             assert "promo_rewards_line" in trig_line, f"Trigger line missing its 'rewards line' tag: {trig_line}"
@@ -179,7 +181,7 @@ class TestPromotionBxgy(MobileBaseSetup):
 
         with allure.step(f"Reward line: now discounted {self.reward_percent}% off"):
             rew_line = self.cso.get_cart_line(self.reward_sku, upc=self.reward_upc)
-            assert rew_line["is_promo_active"], f"Reward line did not discount once trigger_qty was met: {rew_line}"
+            assert_promo_state(rew_line, True, "Reward line did not discount once trigger_qty was met - ")
             assert rew_line["promo_name"] == self.promo_name, (
                 f"Reward line promo name {rew_line.get('promo_name')!r} != {self.promo_name!r}")
             assert rew_line["promo_percent"] == self.reward_percent, (

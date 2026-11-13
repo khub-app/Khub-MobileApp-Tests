@@ -36,6 +36,7 @@ from utilities import promotion_data
 from utilities.api_client import ApiClient
 from utilities.currency import money, parse_currency
 from utilities.logger import get_logger
+from utilities.promotion_asserts import assert_promo_state
 
 logger = get_logger(__name__)
 
@@ -45,6 +46,7 @@ with open("data/test_data.yaml", "r", encoding="utf-8") as f:
 CFG = TEST_DATA["promotion_sale"]
 
 
+@allure.suite("Marketing Promotions")
 @allure.feature("Promotions")
 @allure.story("Multiple independent promotions in one cart - Promo Savings sums all of them")
 @pytest.mark.promotion
@@ -150,11 +152,11 @@ class TestPromotionMultiPromoCart(MobileBaseSetup):
                 undiscounted_total += full_total
 
                 if l["role"] == "bxgy_trigger":
-                    assert not line["is_promo_active"], f"BXGY trigger line should never be discounted: {line}"
+                    assert_promo_state(line, False, "BXGY trigger line should never be discounted - ")
                     assert money(line["line_total"]) == full_total
                     discounted_total += full_total
                 else:
-                    assert line["is_promo_active"], f"'{l['label']}' expected to be discounted: {line}"
+                    assert_promo_state(line, True, f"'{l['label']}' expected to be discounted - ")
                     if l.get("promo_name"):
                         assert line["promo_name"] == l["promo_name"], (
                             f"'{l['label']}' promo name {line.get('promo_name')!r} != {l['promo_name']!r}")

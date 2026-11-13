@@ -59,3 +59,15 @@ class FulfillmentLocators:
     @staticmethod
     def button_containing(text: str):
         return (UIA, f'new UiSelector().descriptionContains("{text}")')
+
+    # Product label chip on the active Picking list's "To Pick" product card
+    # (NOT the Fulfillment order-summary card's own unrelated "Tags" / "+ Add
+    # Tag" feature - confirmed live 2026-11-12 those are a different,
+    # order-level tagging system). Each product card has its own "Labels:"
+    # row; a Label Management label assigned to that product (show_on_
+    # fulfillment=True) renders there as its own exact-text content-desc
+    # chip, in its configured background/text color - confirmed via
+    # scripts/_recon_picking_label.py.
+    @staticmethod
+    def product_label_chip(label_name: str):
+        return (UIA, f'new UiSelector().description("{label_name}")')

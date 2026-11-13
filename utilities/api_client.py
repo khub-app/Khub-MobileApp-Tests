@@ -1,5 +1,6 @@
 import random
 import time
+from datetime import datetime
 
 import requests
 
@@ -584,3 +585,481 @@ class ApiClient:
             if customer_name in hay:
                 return e.get("no")
         return entities[0].get("no") if entities else None
+
+    # ── product labels (Label Management) ──────────────────────────────
+    # Separate from create_product/create_uom_product on purpose - those
+    # stay untouched. Reverse-engineered live 2026-11-12 from the portal's
+    # own "Add Label" picker (Product Catalog > Products, list screen):
+    # GET .../catalog/tags/list?tag_type=1&status=1&page_size=-1 lists every
+    # Product-type label ({id, value, tag_type, color, bg_color,
+    # description, status, external_details:{show_on_fulfillment,
+    # show_on_invoice}}), and PUT .../catalog/products/{id}/labels with
+    # {"tag_ids": [...]} sets a product's full label set (a replace, not a
+    # toggle - resend every id the product should end up with).
+    def create_product_label(
+        self,
+        label_name: str,
+        bg_color: str = "#817CDB",
+        text_color: str = "#FFFFFF",
+        show_on_fulfillment: bool = True,
+        show_on_invoice: bool = True,
+        description: str = "Created via API for automated test data",
+    ) -> dict:
+        """Create a Product-type Label Management label (tag_type=1) via
+        the backend directly - same `Create Label` form the portal's
+        Product Catalog > Products list and the mobile app's Label
+        Management screen both use. Reverse-engineered live 2026-11-12 from
+        the portal's own "Create New Label" modal:
+        POST .../catalog/tags/v2 {value, tag_type, color, bg_color, status,
+        description, show_on_fulfillment, show_on_invoice}. Avoids needing
+        to drive the mobile UI (tests/labels/test_label_management_create_label.py)
+        just to get a label to assign to a product.
+
+        Returns {id, name, bg_color, text_color}."""
+        payload = {
+            "value": label_name,
+            "tag_type": 1,
+            "color": text_color,
+            "bg_color": bg_color,
+            "status": 1,
+            "description": description,
+            "show_on_fulfillment": show_on_fulfillment,
+            "show_on_invoice": show_on_invoice,
+        }
+        resp = self.session.post(self.base + "/tenant/api/v1/catalog/tags/v2", json=payload, timeout=30)
+        if resp.status_code not in (200, 201):
+            raise RuntimeError(f"Label '{label_name}' creation failed ({resp.status_code}): {resp.text[:400]}")
+        data = resp.json()
+        entity = data.get("entity") or data.get("data") or data
+        label_id = entity.get("id")
+        if not label_id:
+            raise RuntimeError(f"Label created but ID not in response: {data}")
+        logger.info(f"Created Product label '{label_name}' (id={label_id}, bg={bg_color}, text={text_color})")
+        return {"id": label_id, "name": label_name, "bg_color": bg_color, "text_color": text_color}
+
+    def get_product_label_id(self, label_name: str) -> int | None:
+        """Resolve a Label Management label's id by its exact name (the
+        `value` field), searching active Product-type (tag_type=1) labels
+        only - i.e. the labels tests/labels/test_label_management_create_label.py
+        creates. Returns None if no active label has that exact name."""
+        resp = self.session.get(
+            self.base + "/tenant/api/v1/catalog/tags/list",
+            params={"tag_type": 1, "status": 1, "page_size": -1},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        entities = data.get("entities") or data.get("data", {}).get("entities") or []
+        for tag in entities:
+            if tag.get("value") == label_name:
+                return tag.get("id")
+        return None
+
+    def set_product_labels(self, product_id: int, tag_ids: list[int]) -> None:
+        """Set a product's full label set (replaces whatever was assigned
+        before - pass every tag_id the product should end up with, not just
+        the one being added)."""
+        resp = self.session.put(
+            self.base + f"/tenant/api/v1/catalog/products/{product_id}/labels",
+            json={"tag_ids": tag_ids},
+            timeout=30,
+        )
+        if resp.status_code not in (200, 201):
+            raise RuntimeError(
+                f"Setting labels {tag_ids} on product {product_id} failed "
+                f"({resp.status_code}): {resp.text[:400]}"
+            )
+        logger.info(f"Set labels {tag_ids} on product {product_id}")
+
+    def create_product_with_label(
+        self,
+        category_id: int,
+        channels: list[dict],
+        label_name: str,
+        price: float = 25.00,
+        in_hand: int = 100,
+        is_online: bool = True,
+        tag: str | None = None,
+    ) -> dict:
+        """Create a sellable product (same shape/defaults as create_product,
+        which this calls unmodified) and assign it the named, pre-existing
+        Product label by name (e.g. one created via
+        tests/labels/test_label_management_create_label.py). Exists to give
+        Label Management Phase 2+ a product to work with without touching
+        the UI's own (currently broken - see CLAUDE.md) Category picker.
+
+        Raises RuntimeError if no active label named `label_name` exists.
+        Returns create_product's dict plus {"label_id", "label_name"}."""
+        label_id = self.get_product_label_id(label_name)
+        if label_id is None:
+            raise RuntimeError(
+                f"No active Product label named '{label_name}' found via "
+                f"catalog/tags/list - create it first (Label Management)."
+            )
+        product = self.create_product(
+            category_id, channels, price=price, in_hand=in_hand,
+            is_online=is_online, tag=tag,
+        )
+        self.set_product_labels(product["id"], [label_id])
+        product["label_id"] = label_id
+        product["label_name"] = label_name
+        logger.info(f"Assigned label '{label_name}' (id={label_id}) to product {product['id']}")
+        return product
+
+    def create_product_with_new_label(
+        self,
+        category_id: int,
+        channels: list[dict],
+        bg_color: str = "#817CDB",
+        text_color: str = "#FFFFFF",
+        price: float = 25.00,
+        in_hand: int = 100,
+        is_online: bool = True,
+        tag: str | None = None,
+    ) -> dict:
+        """One-call test-data builder: creates a brand-new Product label
+        (create_product_label) and a brand-new product carrying it
+        (create_product_with_label) - no live UI needed for either. Each
+        run gets its own unique label, same generated-name convention as
+        the rest of this suite, so runs never collide or reuse each
+        other's labels.
+
+        Returns create_product_with_label's dict (id, name, sku, upc,
+        price, label_id, label_name) plus {"label_bg_color", "label_text_color"}."""
+        label_name = f"Halvik {names.new_tag()}"
+        label = self.create_product_label(
+            label_name, bg_color=bg_color, text_color=text_color,
+            description="Automation test product label",
+        )
+        product = self.create_product_with_label(
+            category_id, channels, label["name"],
+            price=price, in_hand=in_hand, is_online=is_online, tag=tag,
+        )
+        product["label_bg_color"] = label["bg_color"]
+        product["label_text_color"] = label["text_color"]
+        return product
+
+    # ── tier pricing + promotions (Customer Tier vs Promotion scenario) ────
+    # Separate from create_product/create_customer on purpose - those stay
+    # untouched. Reverse-engineered live 2026-11-13 from the portal's own
+    # Add Customer form ("Tier" dropdown: Tier 1-5 / None, Basic Details
+    # section) and a product's Define Pricing grid ("Tier 1 SP ($)" ...
+    # "Tier 5 SP ($)" columns). Both fields already existed, unused, in
+    # create_customer's payload (`"tier_id": None`) and create_product's
+    # per-unit-price payload (`"unit_price_tiers": [{"tier_id": i, "price":
+    # 0, ...} for i in range(1, 6)]`) - confirmed live via a throwaway probe
+    # that POSTing non-zero unit_price_tiers prices and a non-null
+    # customer tier_id (plain integers 1-5, no separate tier-list endpoint
+    # exists - the dropdown is a fixed client-side enum) both round-trip
+    # correctly on GET.
+    def create_customer_with_tier(self, tier_id: int, is_msa_compliant: bool = False,
+                                   tag: str | None = None) -> dict:
+        """Same as create_customer, plus a Tier assignment (1-5). A
+        customer with a tier gets that tier's Tier <n> SP price on any
+        product that defines one, in place of its regular Sale Price -
+        see create_product_with_tier_prices."""
+        name, _ = names.customer_name("admin", tag=tag)
+        email = names.customer_email(name)
+        phone = f"+1 (555) {random.randint(100, 999)}-{random.randint(1000, 9999)}"
+        phone_digits = phone.replace("+", "").replace(" ", "").replace("(", "").replace(")", "").replace("-", "")
+
+        payload = {
+            "name": name,
+            "no": None,
+            "email": email,
+            "alternate_email": None,
+            "skip_shipping_billing": True,
+            "tier_id": tier_id,
+            "phone_no": None,
+            "business_no": None,
+            "business_name": name,
+            "business_city": None,
+            "password": "Password@123",
+            "business_state": None,
+            "business_phone_no": phone,
+            "whatsapp_no": phone_digits,
+            "date_of_join": None,
+            "balance_limit_check": False,
+            "excluded_product_ids": [],
+            "is_msa_compliant": is_msa_compliant,
+            "is_active": True,
+            "customer_type": None,
+            "dba_name": name,
+            "address": None,
+            "sale_agent": "",
+            "business_tax_no": None,
+            "business_tax_expiry_date": None,
+            "allow_ecom": "N",
+            "promotion_acceptance": "Y",
+            "class_of_trades": "Retailer",
+            "invoice_aging": 0,
+            "custom_status": False,
+            "note": None,
+            "out_of_state": False,
+            "is_exempt_from_tax": "N",
+            "tax_ids": [],
+            "all_taxes_applicable": True,
+            "restricted_category_ids": [],
+            "allowed_category_ids": [],
+            "category_access_type": None,
+            "restricted_product_ids": [],
+            "sale_agent_id": None,
+            "sale_agent_obj": {"key": None, "value": None, "label": "Select User"},
+            "resale_certificate_expiry": None,
+            "business_certificate_expiry": None,
+            "tobacco_license_expiry": None,
+            "state_id_license_expiry": None,
+            "is_whatsapp_customer": False,
+            "customer_shipping_details": {
+                "name": name,
+                "company_name": name,
+                "telephone_num": phone,
+                "address": "4545 Ludtano Ln",
+                "country": "United States",
+                "county": "BALTIMORE CITY",
+                "city": "Aberdeen Proving Ground",
+                "state": "MARYLAND",
+                "zip_code": "21001",
+                "shipping_no": None,
+                "tax_jurisdiction": "MARYLAND",
+                "is_billing_same": "Y",
+            },
+            "customer_billing_details": {
+                "name": name,
+                "company_name": name,
+                "telephone_num": phone,
+                "address": "4545 Ludtano Ln",
+                "country": "United States",
+                "county": "BALTIMORE CITY",
+                "city": "Aberdeen Proving Ground",
+                "state": "MARYLAND",
+                "zip_code": "21001",
+            },
+            "resale_certificate_num": None,
+            "resale_certificate": None,
+            "business_certificate": None,
+            "business_certificate_num": None,
+            "state_id_license": None,
+            "state_id_license_num": None,
+            "tobacco_license": None,
+            "tobacco_license_num": None,
+            "county": "",
+            "billing_email": None,
+            "tax_expiry_date": None,
+        }
+
+        resp = self.session.post(
+            self.base + "/tenant/api/v1/sale/customers",
+            json=payload,
+            timeout=30,
+        )
+        if resp.status_code not in (200, 201):
+            raise RuntimeError(f"Customer creation failed ({resp.status_code}): {resp.text[:400]}")
+        data = resp.json()
+        entity = data.get("entity") or data.get("data") or data
+        customer_id = entity.get("id") or entity.get("customer_id")
+        customer_no = entity.get("no") or entity.get("customer_no")
+        logger.info(f"Created customer '{name}' (id={customer_id}, no={customer_no}, tier_id={tier_id})")
+        return {"id": customer_id, "no": customer_no, "name": name, "phone": phone,
+                "email": email, "tier_id": tier_id}
+
+    def create_product_with_tier_prices(
+        self,
+        category_id: int,
+        channels: list[dict],
+        tier_prices: dict,
+        price: float = 250.00,
+        in_hand: int = 100,
+        is_online: bool = True,
+        tag: str | None = None,
+    ) -> dict:
+        """Same as create_product, plus non-zero Tier <n> SP prices (1-5)
+        on its single Piece unit. `tier_prices` maps tier_id (1-5) -> price;
+        any tier not given keeps the product's default of 0 (no override
+        for that tier). Returns create_product's usual dict plus
+        {"tier_prices": tier_prices}."""
+        name, _ = names.product_name("admin", tag=tag)
+        upc = str(random.randint(1_000_000_000, 9_999_999_999))
+
+        unit_price = {
+            "base_cost": price * 0.6,
+            "cost": price * 0.6,
+            "margin": 10,
+            "price": price,
+            "lowest_selling_price": 0,
+            "ecom_price": None,
+            "upc": upc,
+            "is_msa_upc": False,
+            "definition": 1,
+            "unit": 1,
+            "subUnitId": None,
+            "unitType": "Piece",
+            "subUnit": "Unit",
+            "margin_type": 1,
+            "unit_price_tiers": [
+                {"tier_id": i, "price": tier_prices.get(i, 0), "placeholder": f"Tier {i}"}
+                for i in range(1, 6)
+            ],
+            "unit_name": "Piece",
+            "msrp_price": 0,
+        }
+
+        def _channel_entry(ch: dict, test_val: int) -> dict:
+            return {
+                "channel_name": ch["name"],
+                "channel_id": ch["id"],
+                "in_hand": in_hand,
+                "on_hold": 0,
+                "damaged": 0,
+                "min_qty": 0,
+                "max_qty": 0,
+                "sold_by_unit": 1,
+                "bought_by_unit": 1,
+                "autoCalculate": False,
+                "unit_prices": [unit_price],
+                "ps_allowed_qty": None,
+                "test": test_val,
+            }
+
+        channel_info = [_channel_entry(ch, i + 1) for i, ch in enumerate(channels)]
+
+        slug = names.slugify(name)
+        payload = {
+            "name": name,
+            "brand_id": None,
+            "slug": slug,
+            "auto_generate_sku": True,
+            "auto_fetch_img": False,
+            "is_tax_applicable": True,
+            "back_order_portal": True,
+            "back_order_ecom": False,
+            "is_msa_compliant": False,
+            "description": "",
+            "desc_alter_by_client": False,
+            "upc": upc,
+            "upc_2": "",
+            "upc_3": "",
+            "mlc": "",
+            "bin": "",
+            "piece_definition": 1,
+            "piece_upc": upc,
+            "pack_definition": "",
+            "pack_upc": "",
+            "case_definition": "",
+            "case_upc": "",
+            "pallet_definition": "",
+            "pallet_upc": "",
+            "autoCalculate": True,
+            "zone": "",
+            "aisle": "",
+            "gtn": "",
+            "weight_unit": 2,
+            "imagesUploadLoading": False,
+            "images": [],
+            "images_seo": [],
+            "video_type": 5,
+            "main_category_id": category_id,
+            "min_qty": "",
+            "max_qty": "",
+            "status": 1,
+            "is_online": is_online,
+            "is_hot_seller": False,
+            "is_featured": False,
+            "is_new_arrival": False,
+            "attributes": [],
+            "attribute_groups": [],
+            "unit_of_measurement": 10,
+            "channel_info": channel_info,
+            "product_seo_meta_data": {"description": "", "title": ""},
+            "other_upcs": [],
+            "ecom_name": None,
+            "cost": 0,
+            "base_cost": 0,
+            "margin": 0,
+            "category_ids": [category_id],
+            "supplier_ids": [],
+            "tag_values": [],
+            "manufacturer_ids": [],
+            "age_threshold": 21,
+        }
+
+        resp = self.session.post(
+            self.base + "/tenant/api/v1/catalog/products",
+            json=payload,
+            timeout=30,
+        )
+        if resp.status_code not in (200, 201):
+            raise RuntimeError(f"Product '{name}' creation failed ({resp.status_code}): {resp.text[:400]}")
+        data = resp.json()
+        entity = data.get("entity") or data.get("data") or data
+        product_id = entity.get("id") or entity.get("product_id")
+        sku = self._extract_sku(entity) or (self.get_product(product_id) or {}).get("sku")
+        logger.info(f"Created product '{name}' (id={product_id}, sku={sku}, upc={upc}, "
+                    f"price=${price}, tier_prices={tier_prices})")
+        return {"id": product_id, "name": name, "sku": sku, "upc": upc, "price": price,
+                "tier_prices": tier_prices}
+
+    def create_promotion(
+        self,
+        product_id: int,
+        channel_id: int,
+        reward_percent: float,
+        trigger_qty: int = 1,
+        max_reward_qty: int = 100,
+        unit: int = 1,
+        name: str | None = None,
+    ) -> dict:
+        """Create a Basic (single-product, percent-off) promotion - same
+        payload shape reverse-engineered for khub-web-tests'
+        create_mobile_promotion_scenarios_api.py (promotion_type=1,
+        trigger_sources == reward_sources for a single-product Basic
+        promo, unit=1 is Piece). Kept local to this project (rather than
+        reusing that sibling script) because it targets a product this
+        project creates itself (with tier prices) - not one of the
+        sibling repo's own fixed scenario products.
+
+        Returns {"id", "name"}."""
+        name = name or f"Mobile_TierVsPromo_{random.randint(100000, 999999)}"
+        detail = {
+            "id": None,
+            "trigger_qty": trigger_qty,
+            "max_reward_qty": max_reward_qty,
+            "reward_value_type": 1,  # percent
+            "reward_value": reward_percent,
+            "max_repeats_per_order": None,
+            "trigger_sources": [{"source_entity_name": "products", "source_id": product_id, "unit": unit}],
+            "reward_sources": [{"source_entity_name": "products", "source_id": product_id, "unit": unit}],
+        }
+        payload = {
+            "name": name,
+            "start_datetime": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S"),
+            "end_datetime": None,
+            "has_sale_badge": False,
+            "sale_badge_template": None,
+            "display_counter": False,
+            "counter_duration": None,
+            "counter_template": 2,
+            "applicable_for": 2,
+            "customer_group_ids": [],
+            "applicable_to": 1,  # All Customers
+            "promotion_details": [detail],
+            "channel_id": channel_id,
+            "promotion_type": 1,  # Basic
+            "funding_manufacturer_percent": 0,
+            "tax_basis": 1,
+            "is_scan_report_eligible": False,
+            "report_destination": None,
+        }
+        resp = self.session.post(
+            self.base + "/tenant/api/v1/marketing/promotions",
+            json=payload,
+            timeout=30,
+        )
+        if resp.status_code not in (200, 201):
+            raise RuntimeError(f"Promotion '{name}' creation failed ({resp.status_code}): {resp.text[:400]}")
+        data = resp.json()
+        entity = data.get("entity") or data.get("data") or data
+        promo_id = entity.get("id")
+        logger.info(f"Created promotion '{name}' (id={promo_id}) on product {product_id}, "
+                    f"{reward_percent}% off, qty {trigger_qty}-{max_reward_qty}")
+        return {"id": promo_id, "name": name}

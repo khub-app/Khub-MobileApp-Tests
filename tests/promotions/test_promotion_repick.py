@@ -33,6 +33,7 @@ from utilities import promotion_data
 from utilities.api_client import ApiClient
 from utilities.currency import money, parse_currency
 from utilities.logger import get_logger
+from utilities.promotion_asserts import assert_promo_state
 
 logger = get_logger(__name__)
 
@@ -43,6 +44,7 @@ CFG = TEST_DATA["promotion_sale"]
 QTY = 1   # the scenario's own min_qty - both promos are eligible here
 
 
+@allure.suite("Marketing Promotions")
 @allure.feature("Promotions")
 @allure.story("Promo Re-Pick - two overlapping promotions, the higher one auto-applies")
 @pytest.mark.promotion
@@ -125,7 +127,7 @@ class TestPromotionRepick(MobileBaseSetup):
             self.cso.add_product_by_sku(self.sku, qty=QTY, upc=self.piece_upc)
         with allure.step("The cart line names the HIGHER promotion and its percent"):
             line = self.cso.get_cart_line(self.sku, upc=self.piece_upc)
-            assert line["is_promo_active"], f"No promotion applied at all: {line}"
+            assert_promo_state(line, True, "No promotion applied at all - ")
             assert line["promo_name"] == self.higher_promo_name, (
                 f"Applied promo {line.get('promo_name')!r} != the higher one "
                 f"{self.higher_promo_name!r}")

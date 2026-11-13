@@ -472,9 +472,70 @@ in `scripts/_inspect/`.
 | **Login** | Valid login → Dashboard; empty-credentials validation errors |
 | **Sale Order + Fulfillment** | `tests/fulfillment/test_online_sale_fulfillment.py` — API-built customer + products (`online_sale.product_count` in `data/test_data.yaml`, default 2) → create & fully-pay (Cash) an **Online** sale → validate in Sales History + View Details → assign to me → pick all → pack all → confirm the same `SO-…` in the Packed section. One `test_NN_*` per UI step, shared class state, API test-data via `utilities/api_client.py` (`ApiClient`, ported from khub-pos-tests). Generated names come from `utilities/test_data_names.py` — a realistic business/product name + `QA-<YYMMDD>-<HHMMSS>-<rand>` tag (kept byte-identical across khub-pos-tests / khub-Ecom-tests). |
 | **UOM (multi-unit) Sale Order + Fulfillment** | `tests/fulfillment/test_uom_multi_unit_sale_fulfillment.py` — mirrors khub-web-tests' UOM multi-unit scenario (`PWkhubTest/UOM/test_uom_multi_unit_sale_fulfilment_validation_runner.py`). One product configured via the backend API with 4 chained packaging tiers (Piece/Pack/Case/Pallet, custom labels on the top 3 — `ApiClient.create_uom_product`, same payload shape as khub-web-tests' `scripts/create_uom_products_api.py`) is added to a single Online sale as 4 **separate** lines, fully paid, validated (per-tier price × qty = subtotal, cart summary totals, Sales History card, View Details line totals), then taken through the same assign → pick → pack → Packed lifecycle. See "UOM tier add-another-unit flow" below for the live app behavior this is built around. |
-| **Promotions** | `tests/promotions/` — 9 promotion-engine scenarios from the cross-repo data contract (see "Promotions — mobile test data" below), each a full Online sale, fully paid, validated end-to-end against the live cart/Cart Summary/Sales History/View Details: `test_promotion_multi_tier.py` (one Basic promotion across all 4 UOM tiers of one product), `test_promotion_phase2_boundary.py` (qty-range boundary — discount on at qty 2/3/5, off at 1/6, each a fresh discarded order except the one carried to checkout), `test_promotion_repick.py` (two overlapping promotions, the higher auto-applies — no switch/picker UI exists on this app, confirmed live, so none is exercised), `test_promotion_bxgy.py` (trigger product reaching its qty live-discounts a different reward product already in the cart), `test_promotion_buy3_get2.py` (same BXGY mechanism, trigger_qty=3/max_reward_qty=2/50% — additionally proves the reward-qty upper boundary is a hard on/off, not partial), `test_promotion_multi_promo_cart.py` (3 independent promotions in one cart — Cart Summary's Promo Savings correctly sums all 3, reusing existing scenario products rather than new data), `test_promotion_additional_discount_stacking.py` (a manual Additional Discount stacks cleanly on top of an active promo — independent fields, no double-counting), `test_promotion_validity_window.py` (a not-yet-started or already-expired promotion applies no discount at all), `test_promotion_customer_targeting.py` (a promotion scoped to one Customer Group discounts only its members, confirmed negative for a non-member customer). Mobile never creates any promotion or product itself — see "Promotions — mobile test data (cross-repo)" below for the full data contract and "Promotions — live app behavior" for what the cart/invoice actually show, including a confirmed View Details display bug on discounted lines, a confirmed non-working self-referential-BXGY configuration, and the Customer Group targeting fixture. |
+| **Promotions** | `tests/promotions/` — 9 promotion-engine scenarios from the cross-repo data contract (see "Promotions — mobile test data" below), each a full Online sale, fully paid, validated end-to-end against the live cart/Cart Summary/Sales History/View Details: `test_promotion_multi_tier.py` (one Basic promotion across all 4 UOM tiers of one product), `test_promotion_phase2_boundary.py` (qty-range boundary — discount on at qty 2/3/5, off at 1/6, each a fresh discarded order except the one carried to checkout), `test_promotion_repick.py` (two overlapping promotions, the higher auto-applies — no switch/picker UI exists on this app, confirmed live, so none is exercised), `test_promotion_bxgy.py` (trigger product reaching its qty live-discounts a different reward product already in the cart), `test_promotion_buy3_get2.py` (same BXGY mechanism, trigger_qty=3/max_reward_qty=2/50% — additionally proves the reward-qty upper boundary is a hard on/off, not partial), `test_promotion_multi_promo_cart.py` (3 independent promotions in one cart — Cart Summary's Promo Savings correctly sums all 3, reusing existing scenario products rather than new data), `test_promotion_additional_discount_stacking.py` (a manual Additional Discount stacks cleanly on top of an active promo — independent fields, no double-counting), `test_promotion_validity_window.py` (a not-yet-started or already-expired promotion applies no discount at all), `test_promotion_customer_targeting.py` (a promotion scoped to one Customer Group discounts only its members, confirmed negative for a non-member customer). Mobile never creates any promotion or product itself for these 9 — see "Promotions — mobile test data (cross-repo)" below for the full data contract and "Promotions — live app behavior" for what the cart/invoice actually show, including a confirmed View Details display bug on discounted lines, a confirmed non-working self-referential-BXGY configuration, and the Customer Group targeting fixture. A `utilities/promotion_asserts.py` helper (`assert_promo_state`) wraps every `is_promo_active` assertion across these files — on an unexpected discount it checks whether the live promo's name starts with `Mobile_` (this suite's own naming convention) and, if not, flags it as likely shared-tenant promotion contamination (see "Shared-tenant promotion contamination" below) rather than a test/app bug. A 10th scenario, `test_promotion_tier_pricing.py`, is NOT part of that cross-repo contract (it needs a product with Customer Tier prices, a field only this project's own `ApiClient` creates) — see "Customer Tier pricing vs. Promotions" below. |
+| **Label Management** | `tests/labels/test_label_management_create_label.py` — Phase 1 (see "Label Management" below): creates a Product label with a unique name, both Fulfillment and Invoice display destinations enabled, background `#817CDB` / text `#FFFFFF` via the color picker's Hex input, confirms the "Tag has been saved successfully." message, and confirms the new card appears in the list. `tests/labels/test_label_management_product_fulfillment.py` — Phases 2-5: a label + product created via API (`ApiClient.create_product_with_new_label` — sidesteps the mobile UI's own broken Category picker, see below) goes through a full paid Online Sale Order and Fulfillment (assign → pick → pack); confirms the label is visible on the active Picking list's per-product chip (where `show_on_fulfillment` actually renders — not the Fulfillment order card, whose own "Tags" field is an unrelated order-level feature) and on the Print Invoice page opened from Sales History (where `show_on_invoice` actually renders — a real web page in the device's own Chrome browser, not a screen in this app, see `pages/print_invoice_page.py`), and logs (without asserting, since this specific screen never shows it) that the label does not appear on View Details. Native in-app product creation (assigning a label to a product *through the UI*) remains blocked by the Category picker — see below. |
 
-Everything else (Sales, Customers, Profile, Scan) is future work.
+Everything else (Sales, Customers, Scan) is future work.
+
+### Customer Tier pricing vs. Promotions — confirmed live 2026-11-13
+
+Two fields existed on the live portal, unused by this project, even though
+their payload plumbing already existed (unused) in `create_customer` and
+`create_product`:
+- **Add Customer form, Basic Details**: a **Tier** dropdown (`None` / Tier
+  1-5) — reverse-engineered live: it's a fixed client-side enum, no network
+  call fetches it, and the backend field is plain `tier_id` (int 1-5 or
+  `null`), confirmed round-tripping correctly on `GET
+  /tenant/api/v1/sale/customers/{id}`.
+- **A product's Define Pricing grid**: `Tier 1 SP ($)` … `Tier 5 SP ($)`
+  columns per unit — backend field `unit_price.unit_price_tiers`, a list of
+  `{"tier_id": 1..5, "price": ...}` (already being sent as all-zero
+  placeholders by the existing `create_product`/`create_uom_product`
+  payloads — `price: 0` means "no override for that tier").
+
+New, separate `ApiClient` methods (existing `create_customer`/
+`create_product`/`create_uom_product` untouched, same convention as Label
+Management's own API methods): `create_customer_with_tier(tier_id)`,
+`create_product_with_tier_prices(category_id, channels, tier_prices:
+{tier_id: price, ...}, price=...)`, and `create_promotion(product_id,
+channel_id, reward_percent, trigger_qty=1, max_reward_qty=100, ...)` (a
+Basic/percent-off promotion, same payload shape as khub-web-tests'
+`create_mobile_promotion_scenarios_api.py` but kept local to this project
+since it targets a product only this project creates — one with tier
+prices, outside that script's fixed 7-scenario contract).
+
+**Live app behavior, confirmed via a throwaway Appium probe before writing
+`tests/promotions/test_promotion_tier_pricing.py`** — NOT a simple "pick
+whichever of (tier price, promo-discount-of-the-original-price) is lower"
+comparison:
+1. A non-zero `Tier <n> SP` for the customer's own tier **unconditionally
+   replaces** the product's regular Sale Price as the cart line's base
+   price — confirmed in **both directions**: tier price $100 vs. regular
+   $250 shows $100 in the cart; tier price $300 vs. regular $250 shows
+   $300. The tier price is simply authoritative once non-zero — there is
+   no "use whichever is lower" check at this step, even when the tier
+   price is the *higher* number.
+2. Any active promotion on the product still applies its percent-off
+   **on top of** whichever base step 1 produced (it **stacks** — the
+   engine does not compare "tier price" against "promo off the regular
+   price" and pick one). Confirmed with tier=$100, regular=$250, promo=20%:
+   the cart line's own "Sale Price" is $100 (not $250), the promo banner's
+   "original" price is $100 (not $250), and the discounted price is $80
+   (not $100, not $200 = 250×0.8).
+3. Cart Summary's own "Sub Total" already nets out this line's discount
+   (same documented behavior as every other promotion scenario here) — it
+   equals $80 here, not the plain tier price $100.
+
+The net effect is still exactly "lowest price always wins" as an
+end-to-end *outcome* ($80 < plain tier $100 < promo-off-regular $200 <
+full $250), even though the underlying *mechanism* is "tier overrides
+base unconditionally, promotion still stacks on top" rather than a single
+`min()` over two candidates. `test_promotion_tier_pricing.py` asserts both
+the mechanism (cart line's `sale_price`/`promo_original_price`/
+`promo_discounted_price` fields) and that outcome ordering, then carries
+the sale through Cart Summary, Cash payment, Sales History and View
+Details to confirm the paid invoice reflects the tier-then-promo amount
+throughout.
 
 ### Sales Return — investigated 2026-11-10, NOT YET automatable
 
@@ -526,3 +587,288 @@ right, comparable in scope to Fulfillment's own pick/pack), or (b) find/
 build a backend API that marks an order Completed without the UI flow
 (mirroring how Promotions bypasses its own UI) - worth asking the web/QA
 side about directly, the way the promotion payloads were handed off.
+
+### Shared-tenant promotion contamination — confirmed live 2026-11-11/12
+
+The preprod tenant is shared across all 3 QA suites AND real manual testers
+(Marketing > Promotions lists ~95+ promotions going back months, many
+named after people - "Nihal sale", "Danish Javed test permotions", etc.).
+Twice in one night, a promotion **not created by this suite** silently
+discounted this suite's own freshly-created scenario products and broke
+otherwise-passing promotion tests (`test_promotion_buy3_get2.py`,
+`test_promotion_validity_window.py`, and - less obviously - caused
+`test_promotion_multi_tier.py`'s tier-add step to fail by inflating a
+cart line's rendered height): "Aaquil123" (deleted) and "new years"
+(deleted, id=95).
+
+**How this actually happens** - reverse-engineered live via the portal's
+own promotion edit screen, NOT a toggle: a promotion's product scope is
+set via its own "Add Sources" picker (Marketing > Promotions > edit >
+"Add Sources"). Leaving that picker's Search/Category/Brand filters blank
+shows the ENTIRE catalog as candidates; someone then selected a large
+batch of rows from that unfiltered list (confirmed - "new years" had ~100
+individual products explicitly listed in its `promotion_details`,
+including several of this suite's own scenario products that merely
+*happened to already exist* when that selection was made). A product
+created *after* such a promotion's sources were picked is NOT swept in -
+this is a frozen snapshot, not a live "all products" rule. So the risk is
+real but bounded: only to promotions assembled broadly (or edited to add
+new sources later) against products that already existed at that moment.
+
+**Diagnosis going forward**: `utilities/promotion_asserts.py`'s
+`assert_promo_state` flags this automatically - any promotion test
+failure where the unexpectedly-active promo's name does NOT start with
+`Mobile_` almost certainly means another stray promotion is live again.
+Check Marketing > Promotions on the web portal (preprod.ikhub.biz) for one
+covering the SKU named in the failure message, confirm with a teammate
+whether it's still needed, and delete it if not (`DELETE
+/tenant/api/v1/marketing/promotions/{id}` via `ApiClient`, or the
+portal's row-menu "Delete" - both confirmed working live).
+
+### `validity_window` test data ages out in real time — confirmed 2026-11-12
+
+`mobile_promotion_scenarios_<env>.json`'s `not_started` promo is built with
+`start_datetime = generation_time + 2 days` (see
+`create_mobile_promotion_scenarios_api.py`'s `_scenario_validity_window()`).
+That's relative to *generation* time, not run time - if the data file isn't
+regenerated and more than ~2 days pass (e.g. this repo's own session
+spanning past midnight into the next calendar day), the "not started"
+promotion's start time slides into the past and the promo goes live for
+real, exactly like any other active promotion would. Confirmed live
+2026-11-12: `test_promotion_validity_window.py::test_04` failed because
+`Mobile_NotStarted_9571532422` (generated 2026-11-10, start time
+2026-11-12 ~01:23) was by then genuinely active - correctly flagged by
+`assert_promo_state` as "one of our own Mobile_ promotions" (a real
+data-state issue, not shared-tenant contamination) rather than a code bug.
+**Fix**: regenerate the scenario data
+(`python scripts/create_mobile_promotion_scenarios_api.py --env=preprod`
+in `khub-web-tests`) before relying on `validity_window` again if its
+JSON file is more than a day or two old.
+
+## Label Management
+
+### Phase 1: Create a Product Label — confirmed live 2026-11-12, automated
+
+`tests/labels/test_label_management_create_label.py` / `pages/profile_page.py`
+/ `pages/label_management_page.py` / `locators/label_management_locators.py`.
+
+- Reached via the bottom tab bar's **Profile** tab (not the hamburger nav
+  drawer) → **Label Management** menu item. This is a plain list of label
+  cards (`"<name>\nProduct Label\nStatus\nActive\nLabel Preview\n<name>\n
+  Fulfillment\nInvoice[\nDescription\n<desc>]"`, same flattened-View shape
+  as everywhere else) plus a single unlabeled `+` `Button` FAB (same
+  pattern as Sales History's FAB).
+- **Create Label modal fields** (all confirmed by actually creating one
+  end-to-end): Label Name (1st EditText) → Label Type dropdown (shows
+  `"Select"` until chosen; options `"Product"` / `"Order"` only appear
+  once tapped) → once Label Type = Product, a **"Display product labels
+  on"** row appears with two real `CheckBox`-backed options, `Fulfillment`
+  and `Invoice` (tap the wrapping View, not just the CheckBox - both work,
+  confirmed) → an Active toggle (defaults to Active, not exercised) →
+  Background Color / Text Color fields, each showing their current value
+  as a literal hex string (`"#FFFFFF"` / `"#000000"` by factory default)
+  → Description (last EditText) → red **"Create tag"** button.
+- **Color picker has no accessible "pick purple" swatch.** Tapping a color
+  field opens a dialog with a "Hex" input (a plain EditText, e.g. holding
+  `"#FFFFFF"`) and a "Presets" swatch grid below it - but the preset
+  swatches carry no color value in any accessibility attribute (plain
+  `View`s, no content-desc), so there is no reliable way to pick "purple"
+  from the grid itself. **Typing the exact hex into the Hex field and
+  tapping "Apply" is the correct, robust approach** - it's also literally
+  what the scenario spec's hex codes (`#817CDB` / `#FFFFFF`) are for,
+  rather than eyeballing a swatch.
+- **`driver.hide_keyboard()` closes this entire modal, not just the
+  keyboard** - confirmed live: it falls back to an Android BACK press on
+  this screen (a dismissable dialog, confirmed via its `Scrim` element),
+  which dismisses the whole Create Label form and silently discards
+  everything typed. `CreateLabelPage` never calls it; tapping the next
+  field directly is suffient, no explicit hide-keyboard needed between
+  fields on this modal.
+- Success: an info banner `"Info\nTag has been saved successfully."`
+  appears, and the new card is immediately visible at the top of the
+  Label Management list.
+- Selecting a label for a product (Phase 2) uses a **different**,
+  multi-select picker (opened from the Basic Info page's Labels field) -
+  a plain list of label names with NO checkboxes, each tap adding a chip
+  to a "Selected" preview, committed via a separate **Apply** button
+  (confirmed live: this one DOES respond to a plain `.click()` by
+  accessibility id, unlike the Category picker below). A selected label
+  renders in the product form as a chip with a **Delete** (×) button next
+  to it - `BasePage.get_element_color()` (added for this purpose) can
+  sample that chip's rendered background/text color via a screenshot
+  pixel read, since content-desc carries no color information.
+
+### Phases 2-5: automated via an API-created labeled product — confirmed live 2026-11-12
+
+The Category-picker blocker below (product creation via the mobile UI)
+still stands, but Phases 2-5 don't need the UI product-creation flow at
+all: `utilities/api_client.py` gained standalone methods (separate from
+`create_product`/`create_uom_product`, which are untouched) that create a
+Label Management label and a product carrying it entirely via the
+backend API:
+- `ApiClient.create_product_label(label_name, bg_color, text_color, ...)`
+  → `POST /tenant/api/v1/catalog/tags/v2`.
+- `ApiClient.get_product_label_id(label_name)` /
+  `ApiClient.set_product_labels(product_id, tag_ids)` → `GET
+  /tenant/api/v1/catalog/tags/list?tag_type=1&status=1&page_size=-1` and
+  `PUT /tenant/api/v1/catalog/products/{id}/labels` with `{"tag_ids":
+  [...]}` (a full replace of the product's label set, not a toggle/add -
+  resend every id it should end up with). All reverse-engineered live from
+  the portal's own "Add Label" / "Create New Label" pickers (Product
+  Catalog > Products list), the same way the Promotions API was handed off
+  earlier in this project.
+- `ApiClient.create_product_with_label(category_id, channels, label_name,
+  ...)` and the one-call `ApiClient.create_product_with_new_label(
+  category_id, channels, ...)` (generates its own uniquely-tagged label
+  and product together) compose these on top of the existing, unmodified
+  `create_product`.
+
+`tests/labels/test_label_management_product_fulfillment.py` uses this to
+drive a full Phases 2-5 scenario (13 steps, all passing): API-created
+labeled product + customer → Create Sale Order (Online) → add the
+labeled product → Cart Summary → Cash payment → Sales History → View
+Details → assign to me → pick → pack → Packed → Print Invoice. Confirmed
+findings from building it:
+
+- **The label does NOT render on the View Details ("Order Detail") screen**,
+  even though the product's label has `show_on_invoice=True` - its text
+  blob (confirmed via a full read) carries the usual Order Info/Payment
+  History fields and nothing label-related. `test_08` logs this as a
+  warning rather than asserting it, since this specific screen genuinely
+  never shows it - `show_on_invoice` targets a different output entirely
+  (below).
+- **The label DOES render on "Print Invoice"** - confirmed live
+  2026-11-13. A Sales History card's "Show menu" → **"Print Invoice"**
+  does not open a screen inside this app at all: it opens the invoice as a
+  real web page in the device's own **Chrome browser** (`driver.
+  current_package` becomes `com.android.chrome`, a separate task with its
+  own full browser UI - not a WebView/Custom Tab embedded in the app's own
+  task). Each product line there shows its label as a colored chip
+  directly under the product name, exact-text match against the label
+  name - this is what `show_on_invoice=True` actually controls.
+  Automating this needed two things no native screen in this app needs,
+  both handled by the new `pages/print_invoice_page.py`:
+  - **Chrome's own one-time first-run screen** ("Welcome to Chrome...")
+    can appear first - `pm clear` between test classes only clears the
+    *admin app's* data, never Chrome's, so this is a function of whatever
+    state Chrome itself is in on that device/emulator, not of this test.
+    `PrintInvoicePage` dismisses it (`"Use without an account"` etc.) if
+    present.
+  - **The product table only becomes readable after scrolling once** -
+    confirmed live: at 0 scrolls the label/SKU text is absent from
+    `driver.page_source` entirely; after 1 scroll it's present. Chrome's
+    accessibility bridge only exposes a web page's content once it has
+    actually been rendered/scrolled into view, unlike a native screen.
+  - Getting back to the app afterward needs `driver.activate_app(
+    "com.esolutions.demotaxadmin")`, not a plain Android back press -
+    confirmed live that a back press would stay inside Chrome's own
+    history (it's a separate task), while `activate_app` correctly resumes
+    the admin app exactly where it was (e.g. still on Sales History, same
+    order still in the list) rather than restarting it.
+  `test_13` asserts the label (and the SKU, to rule out a false-positive
+  match against the wrong order) are both present after scrolling.
+- **The label does NOT render on the Fulfillment order-summary card either**
+  (Pending/Packed tabs) - that card has its own `"Tags"` field with a
+  `"+ Add Tag"` button, but confirmed live via a crop screenshot that this
+  is a **separate, unrelated, manual order-level tagging feature** (add an
+  arbitrary tag to the whole order), not a Label Management product label
+  display - it's always present and always empty regardless of any
+  product's label.
+- **The label DOES render on the active Picking list** (`"Start Picking"` →
+  the per-product "To Pick" card), as its own `"Labels:"` row holding an
+  exact-text content-desc chip (e.g. `"Halvik QA-..."`), confirmed live via
+  `driver.page_source` containing the label name as its own element,
+  separate from the product's own `"<sku>/<upc>"` line -
+  `FulfillmentLocators.product_label_chip(label_name)` /
+  `PickingPage.is_product_label_present(label_name)`. This is what
+  `show_on_fulfillment=True` actually controls. `test_10` asserts this.
+- **Pixel-color verification of that chip was attempted and deliberately
+  left unasserted** - a real, reproducible finding, not a timing bug:
+  `driver.page_source`'s reported `bounds` for that exact content-desc node
+  is **stable but wrong** across repeated dumps (confirmed by diffing two
+  consecutive `page_source` calls with no action between them - identical,
+  incorrect bounds both times), a 3s settle wait (no change), and a
+  scroll-nudge (shifted the bounds to a *different* still-wrong value, not
+  the correct one). Cropping a screenshot at those bounds, or using the
+  element's own `screenshot_as_png`, lands on an unrelated sibling row
+  (`"Notes:"` or the `"Labels:"` header text) instead of the chip itself -
+  seen identically with both techniques, ruling out a race between reading
+  location and taking the screenshot. This is a genuine Appium/UiAutomator2
+  + RN accessibility bounds-reporting limitation on this one element, not
+  an app defect - `PickingPage.get_product_label_bg_color()` still exists
+  for future use if a reliable anchor/approach is found (e.g. computing an
+  offset from a nearby element with correct bounds), but is not called by
+  the test. Separately, `BasePage.get_element_color()` was changed this
+  session to sample via the element's own `screenshot_as_png` rather than a
+  full-screen screenshot plus manually-read location/size, which fixes a
+  real (if narrower) race on non-virtualized screens - e.g. Phase 1's
+  Create Label dialog - and remains correct there.
+
+Creating a product (Phase 2, via the mobile app's own UI) requires a Category (marked `*`, required)
+before the form can proceed. Live investigation, in order of what was
+tried:
+
+1. `Profile` tab → `Products` (nav drawer item, not the Profile menu) →
+   tapping its `+` FAB first opens an unexpected **channel picker** popup
+   (`"Primary 1"` / `"Secondory"` [sic] / `"Primary"`) - picking a channel
+   there does NOT open product creation; it just re-filters the Products
+   *list* to that channel. The `+` FAB must be tapped **again**, now that
+   a channel is selected, to actually reach "Basic Info" (confirmed live -
+   this is the real product-creation entry point, `pane-title: "Basic
+   Info"`).
+2. Basic Info has, in order: Category\* (tap-to-pick, no EditText) →
+   Product Name\* (EditText) → SKU + "Auto generated SKU" toggle → Primary
+   UPC / Alternative UPC1 / Alternative UPC2 (EditTexts) → Bin Code / Zone
+   / Aisle (EditTexts) → Brand (picker) → Supplier (picker) → **Labels**
+   (the multi-select chip picker described above - confirmed working) →
+   BO/Online/Featured switches → Status (Active/Discontinue/Inactive) →
+   Description (rich-text editor with its own Bold/Italic/etc. toolbar) →
+   Media/Upload Images → `Next` button (bottom, confirmed reachable).
+3. **The Category picker does not respond to any tap, by any method
+   tried.** Confirmed exhaustively live, not a guess from the
+   accessibility dump alone (checked an actual screenshot, not just
+   `page_source`, to rule out a hidden overlay):
+   - `driver.find_element(ACCESSIBILITY_ID, "ACCESSORIES").click()` - no
+     change.
+   - A raw coordinate tap at the row's own reported bounds' center,
+     via Appium's `mobile: clickGesture` - no change.
+   - A raw `adb shell input tap <x> <y>` at the same coordinates,
+     bypassing Appium's gesture layer entirely - no change.
+   - Typing into the picker's own "Search Category" field to filter the
+     list down to a single row, then tapping that - no change.
+   - None of these closed the dialog, changed the `"Tap to select the
+     category"` placeholder text, or advanced `window-id` - the dialog
+     state is provably unchanged after every attempt (same list, same
+     window, every time).
+   - A screenshot taken immediately after one of these taps showed a
+     completely ordinary, unobstructed list (no keyboard, no overlay) -
+     `adb shell dumpsys input_method` separately showed `mInputShown=true`,
+     but the "keyboard" turned out to be the emulator's own floating
+     Gboard side-toolbar sitting at the screen's left edge, x<100 in a
+     window whose content starts at x=680 - nowhere near the category
+     rows, ruled out as the cause.
+   - This is a genuine, reproducible blocker, not a shortcut: every tap
+     technique this project uses elsewhere was tried, and all of them
+     produced zero observable effect on this one specific picker.
+
+Since no product can be saved without a Category, assigning a label
+during product creation **through the mobile app's own UI** specifically
+remains blocked by this picker. This no longer blocks the Phases 2-5
+*scenario* as a whole, though - see the section above: creating the
+labeled product via the backend API sidesteps the picker entirely, and
+`test_label_management_product_fulfillment.py` carries that product
+through the real Sales Order + Fulfillment UI flow end-to-end.
+
+**To unblock the native in-app product-creation flow itself in the
+future** (still worth doing - it's the only way to test the picker /
+Basic Info form as real users actually experience it): investigate the
+Category picker with
+fresh eyes on the live emulator (not blind dump-driven guessing) - try a
+long-press, a drag/swipe-release instead of a tap, inspecting whether the
+row elements sit under an invisible full-screen sibling that intercepts
+touches (`a11y-important` siblings at identical bounds were present
+throughout the dump but not individually tested), or whether this specific
+RN list requires `mobile: clickGesture`'s "duration" to be longer than a
+default quick tap. `pages/label_management_page.py` and the Phase 1 test
+are solid groundwork to build on once this is cracked - `ProductCreatePage`
+itself was never started.

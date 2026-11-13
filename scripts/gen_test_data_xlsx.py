@@ -48,6 +48,9 @@ TAGS = [
     ("tests/promotions/test_promotion_additional_discount_stacking.py", "No", "Yes", "2026-11-10"),
     ("tests/promotions/test_promotion_validity_window.py", "No", "Yes", "2026-11-10"),
     ("tests/promotions/test_promotion_customer_targeting.py", "No", "Yes", "2026-11-10"),
+    ("tests/promotions/test_promotion_tier_pricing.py", "No", "Yes", "2026-11-13"),
+    ("tests/labels/test_label_management_create_label.py", "No", "Yes", "2026-11-12"),
+    ("tests/labels/test_label_management_product_fulfillment.py", "No", "Yes", "2026-11-12"),
 ]
 
 TEST_CONFIGS = [

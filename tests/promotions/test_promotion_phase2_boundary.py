@@ -30,6 +30,7 @@ from utilities import promotion_data
 from utilities.api_client import ApiClient
 from utilities.currency import money, parse_currency
 from utilities.logger import get_logger
+from utilities.promotion_asserts import assert_promo_state
 
 logger = get_logger(__name__)
 
@@ -39,6 +40,7 @@ with open("data/test_data.yaml", "r", encoding="utf-8") as f:
 CFG = TEST_DATA["promotion_sale"]
 
 
+@allure.suite("Marketing Promotions")
 @allure.feature("Promotions")
 @allure.story("Phase 2 - qty-range boundary (on at 2/3/5, off at 1/6)")
 @pytest.mark.promotion
@@ -110,9 +112,9 @@ class TestPromotionPhase2Boundary(MobileBaseSetup):
         expected_undiscounted = money(base_price * qty)
         assert money(line["sub_total"]) == expected_undiscounted, (
             f"qty={qty}: Sub Total {line.get('sub_total')} != {expected_undiscounted}")
-        assert line["is_promo_active"] == in_range, (
-            f"qty={qty}: promo-active={line['is_promo_active']} but qty is "
-            f"{'inside' if in_range else 'outside'} [{self.qty_min},{self.qty_max}]: {line}")
+        assert_promo_state(line, in_range, (
+            f"qty={qty}: qty is {'inside' if in_range else 'outside'} "
+            f"[{self.qty_min},{self.qty_max}] - "))
         if in_range:
             assert line["promo_name"] in self.promo_names, (
                 f"qty={qty}: promo name {line.get('promo_name')!r} not one of {self.promo_names}")

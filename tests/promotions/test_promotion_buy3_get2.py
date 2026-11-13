@@ -40,6 +40,7 @@ from utilities import promotion_data
 from utilities.api_client import ApiClient
 from utilities.currency import money, parse_currency
 from utilities.logger import get_logger
+from utilities.promotion_asserts import assert_promo_state
 
 logger = get_logger(__name__)
 
@@ -49,6 +50,7 @@ with open("data/test_data.yaml", "r", encoding="utf-8") as f:
 CFG = TEST_DATA["promotion_sale"]
 
 
+@allure.suite("Marketing Promotions")
 @allure.feature("Promotions")
 @allure.story("Buy 3 get 2 (different product) at 50% off - plus the reward max-qty boundary")
 @pytest.mark.promotion
@@ -128,13 +130,13 @@ class TestPromotionBuy3Get2(MobileBaseSetup):
             cso = self._open_fresh_order_to_product_step()
             cso.add_product_by_sku(self.reward_sku, qty=over_qty, upc=self.reward_upc)
             line = cso.get_cart_line(self.reward_sku, upc=self.reward_upc)
-            assert not line["is_promo_active"], f"Reward discounted before any trigger in cart: {line}"
+            assert_promo_state(line, False, "Reward discounted before any trigger in cart - ")
         with allure.step(f"Add trigger at qty={self.trigger_qty} (meets trigger_qty) - reward STILL plain"):
             cso.add_product_by_sku(self.trigger_sku, qty=self.trigger_qty, upc=self.trigger_upc)
             line = cso.get_cart_line(self.reward_sku, upc=self.reward_upc)
-            assert not line["is_promo_active"], (
+            assert_promo_state(line, False, (
                 f"Reward discounted despite qty={over_qty} exceeding max_reward_qty="
-                f"{self.max_reward_qty}: {line}")
+                f"{self.max_reward_qty} - "))
             assert money(line["sub_total"]) == money(line["line_total"]), (
                 f"Over-max reward line should be full price: Sub Total {line.get('sub_total')} "
                 f"!= Total {line.get('line_total')}")
@@ -152,7 +154,7 @@ class TestPromotionBuy3Get2(MobileBaseSetup):
             TestPromotionBuy3Get2.cso = cso
         with allure.step("Line is plain - no trigger in cart yet"):
             line = cso.get_cart_line(self.reward_sku, upc=self.reward_upc)
-            assert not line["is_promo_active"], f"Reward already discounted with no trigger in cart: {line}"
+            assert_promo_state(line, False, "Reward already discounted with no trigger in cart - ")
             assert money(line["sub_total"]) == money(line["line_total"])
 
     # ---------------- Part 3: trigger below threshold - no change --------- #
@@ -165,9 +167,9 @@ class TestPromotionBuy3Get2(MobileBaseSetup):
             self.cso.add_product_by_sku(self.trigger_sku, qty=below_qty, upc=self.trigger_upc)
         with allure.step("Reward line is still plain/undiscounted"):
             line = self.cso.get_cart_line(self.reward_sku, upc=self.reward_upc)
-            assert not line["is_promo_active"], (
+            assert_promo_state(line, False, (
                 f"Reward discounted before trigger_qty ({self.trigger_qty}) was met "
-                f"(trigger qty={below_qty}): {line}")
+                f"(trigger qty={below_qty}) - "))
 
     # ---------------- Part 4: trigger meets threshold - reward fully discounts #
     @allure.title("Push the trigger to meet trigger_qty - reward's full qty discounts at 50%")
@@ -177,8 +179,8 @@ class TestPromotionBuy3Get2(MobileBaseSetup):
             self.cso.add_product_by_sku(self.trigger_sku, qty=1, upc=self.trigger_upc)
         with allure.step(f"Trigger line: qty={self.trigger_qty}, itself NOT discounted"):
             trig_line = self.cso.get_cart_line(self.trigger_sku, upc=self.trigger_upc)
-            assert not trig_line["is_promo_active"], (
-                f"Trigger line itself should never be discounted (skip_discounted_trigger): {trig_line}")
+            assert_promo_state(trig_line, False,
+                "Trigger line itself should never be discounted (skip_discounted_trigger) - ")
             assert trig_line.get("promo_name") == self.promo_name, (
                 f"Trigger line promo name {trig_line.get('promo_name')!r} != {self.promo_name!r}")
             assert trig_line.get("promo_trigger_qty") == self.trigger_qty, (
@@ -190,7 +192,7 @@ class TestPromotionBuy3Get2(MobileBaseSetup):
 
         with allure.step(f"Reward line: ALL {self.max_reward_qty} units now discounted {self.reward_percent}% off"):
             rew_line = self.cso.get_cart_line(self.reward_sku, upc=self.reward_upc)
-            assert rew_line["is_promo_active"], f"Reward line did not discount once trigger_qty was met: {rew_line}"
+            assert_promo_state(rew_line, True, "Reward line did not discount once trigger_qty was met - ")
             assert rew_line["promo_name"] == self.promo_name, (
                 f"Reward line promo name {rew_line.get('promo_name')!r} != {self.promo_name!r}")
             assert rew_line["promo_percent"] == self.reward_percent, (
